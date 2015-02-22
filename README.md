@@ -11,7 +11,7 @@ SqlTools can search by any or all of the following:
 
 Yes.
 
-![Code View Interface](/blob/master/Wiki/Images/SqlToolsCodeViewInterface.png)
+![Code View Interface](/Wiki/Images/SqlToolsCodeViewInterface.png)
 
 ## Why do we need yet another way to view and script objects on MSSQL?
 
