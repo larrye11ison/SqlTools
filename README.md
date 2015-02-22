@@ -24,8 +24,13 @@ Clicking the "Script" button gets the SQL object definition for that object and 
 
 ## Why do we need yet another way to view and script objects on MSSQL?
 
-In my daily job I do a lot of prod support work on servers containing dozens databases, many of which have several thousand objects. I constantly need to find stored procs, views, etc. by name, but most
-of the time I don't remember the FULL name of the object I'm looking for (so finding it in an alphabetical listing is very difficult). The search interface(s) in SQL Management Studio were always very cumbersome, so most of the time I was running queries like this over and over:
+In my daily job I do a lot of prod support work on servers containing dozens of databases, 
+many of which have several thousand objects. I constantly need to find stored procs, views, 
+etc. by name, but most of the time I don't remember the FULL name of the object I'm looking 
+for. To make matters worse, a lot of times I don't even remember which *database* it's in.
+
+The search interface(s) in SQL Management Studio were always very cumbersome, so most of the time I was running queries
+like this over and over:
 
 ```
 select *
@@ -40,7 +45,7 @@ I have come across tools that do similar things, but they had problems like:
 
 * They were very buggy
 * They tried to do too much and didn't have enough focus on just *finding stuff*
-* Were super-expensive
+* They were super-expensive
 
 ## Requirements
 
