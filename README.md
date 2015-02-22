@@ -11,6 +11,12 @@ SqlTools can search by any or all of the following:
 
 Yes.
 
+This is the interface for locating objects by searching on the SQL Server:
+
+![Code View Interface](/Wiki/Images/SqlToolsSearchInterface.png)
+
+Any objects that you choose to script out are displayed in this interface:
+
 ![Code View Interface](/Wiki/Images/SqlToolsCodeViewInterface.png)
 
 ## Why do we need yet another way to view and script objects on MSSQL?
