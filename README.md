@@ -7,6 +7,12 @@ SqlTools can search by any or all of the following:
 * Schema Name
 * Object Script
 
+## Can you show me what it looks like?
+
+Yes.
+
+![Code View Interface](/blob/master/Wiki/Images/SqlToolsCodeViewInterface.png)
+
 ## Why do we need yet another way to view and script objects on MSSQL?
 
 In my daily job I do a lot of prod support work on servers containing over a dozen databases and 
