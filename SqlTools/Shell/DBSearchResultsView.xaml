@@ -1,0 +1,125 @@
+﻿<UserControl x:Class="SqlTools.Shell.DBSearchResultsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:cal="http://www.caliburnproject.org"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:foo="clr-namespace:SqlTools.Models.Shell"
+             xmlns:i="http://schemas.microsoft.com/expression/2010/interactivity"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:ui="clr-namespace:SqlTools.UI"
+             xmlns:xc="http://schemas.xceed.com/wpf/xaml/datagrid"
+             MinWidth="200"
+             MinHeight="100"
+             IsEnabled="True"
+             d:DesignHeight="300"
+             d:DesignWidth="600"
+             mc:Ignorable="d">
+    <UserControl.Style>
+        <Style TargetType="UserControl">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsVisible}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsVisible}" Value="False">
+                    <Setter Property="Visibility" Value="Hidden" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Style>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="dick" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Margin="5"
+                       VerticalAlignment="Center"
+                       TextAlignment="Center">
+                Filter
+            </TextBlock>
+            <TextBox x:Name="ResultsFilter"
+                     Grid.Column="1"
+                     FontSize="20" />
+
+            <Button x:Name="ClearResults"
+                    Grid.Column="2"
+                    Margin="5"
+                    Content="Clear All Results" />
+        </Grid>
+
+        <!--
+            <xc:DataGridControl Name="DatabaseObjects"
+            Grid.Row="2"
+            AutoCreateColumns="False"
+            ItemsSource="{Binding DatabaseObjects}"
+            ReadOnly="True">
+            <xc:DataGridControl.Columns>
+            <xc:Column FieldName=".">
+            <xc:Column.CellContentTemplate>
+            <DataTemplate>
+            <Button x:Name="ScriptObject"
+            Content="Script"
+            IsEnabled="{Binding CanScriptObject}"
+            cal:Message.Attach="ScriptTheObject($dataContext)" />
+            </DataTemplate>
+            </xc:Column.CellContentTemplate>
+            </xc:Column>
+            <xc:Column Title="Server"
+            FieldName="SysObject.server_name"
+            ReadOnly="True" />
+            <xc:Column Title="DB"
+            FieldName="SysObject.db_name"
+            ReadOnly="True" />
+            <xc:Column Title="Type"
+            FieldName="SysObject.type_desc"
+            ReadOnly="True" />
+            <xc:Column Title="Schema"
+            FieldName="SysObject.schema_name"
+            ReadOnly="True" />
+            <xc:Column Title="Name"
+            FieldName="SysObject.object_name"
+            ReadOnly="True" />
+            <xc:Column Title="Parent"
+            FieldName="SysObject.parent_fq_name"
+            ReadOnly="True" />
+            <xc:Column Title="Encrypted"
+            FieldName="SysObject.is_encrypted"
+            ReadOnly="True" />
+            </xc:DataGridControl.Columns>
+            </xc:DataGridControl>
+        -->
+        <DataGrid Name="DatabaseObjects"
+                  Grid.Row="2"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  ItemsSource="{Binding DatabaseObjects}">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn>
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button x:Name="ScriptObject"
+                                    Content="Script"
+                                    IsEnabled="{Binding CanScriptObject}"
+                                    cal:Message.Attach="ScriptTheObject($dataContext)" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Binding="{Binding SysObject.server_name}" Header="Server" />
+                <DataGridTextColumn Binding="{Binding SysObject.db_name}" Header="DB" />
+                <DataGridTextColumn Binding="{Binding SysObject.type_desc}" Header="Type" />
+                <DataGridTextColumn Binding="{Binding SysObject.schema_name}" Header="Schema" />
+                <DataGridTextColumn Binding="{Binding SysObject.object_name}" Header="Name" />
+                <DataGridTextColumn Binding="{Binding SysObject.parent_fq_name}" Header="Parent" />
+                <DataGridCheckBoxColumn Binding="{Binding SysObject.is_encrypted}" Header="Encrypted" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>
