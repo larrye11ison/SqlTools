@@ -50,16 +50,16 @@ I have come across tools that do similar things, but they had one or more of the
 Sure, I've got nothing better to do...
 
 * Supports auth via Windows or SQL login with username/password
-* The app's icon is a totally awesome "recliner" - it makes your life so much easier, you'll have more time to relax in your easy chair
-* When searching for objects:
-  * Allows you to filter/search objects by object name, schema name and/or object definition
+* The app's icon is a totally awesome "recliner" because it makes your life so much easier, you'll have more time to relax in your easy chair
+* When searching for objects on the server:
+  * Allows you to search by object name, schema name and/or within object definition (including tables!)
   * Can search across individual DB's on a server or all of them
-  * Searching databases doesn't generally cause too much impact on the server
-  * Each database query is run asynchronously, so searching on a server with a large number of DB's will still happen quickly
-  * After you search, you can use somewhat sophisticated filtering techniques to narrow down those results
+  * Searching across all DB's on a server doesn't generally impact the system too much
+  * Each query against an individual database is run asynchronously, so searching on a server with a large number of DB's will still happen quickly
+  * After you search, you can use somewhat sophisticated filtering techniques to narrow down those results on the client-side
 * When viewing object definition scripts
   * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
-  * Will format object code using [Poor Man's T-SQL Formatter](http://architectshack.com/PoorMansTSqlFormatter.ashx)
+  * Has option to format the object's code using [Poor Man's T-SQL Formatter](http://architectshack.com/PoorMansTSqlFormatter.ashx)
   * Incremental find within object definition scripts.
 
 ## Requirements
@@ -67,4 +67,5 @@ Sure, I've got nothing better to do...
 * .net 4.5 or higher 
   * ...although you could probably convert the project to 4.0 easily if you wanted to
 * An MS SQL 2008 or higher database
-  * Most of the testing and dev has been against SQL 2008 with some limited usage against 2012. So *it should be fine.* 
+  * Most of the testing and dev has been against SQL 2008 with some limited usage against 2012 and 2014. So *it should be fine.* 
+  * All editions of "SQL Server" should work - LocalDB, SQLExpress and various flavors of "full" SQL Server are all fine. The only requirement here is that you need to know how to construct the connection info.
