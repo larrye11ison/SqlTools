@@ -16,8 +16,6 @@ This is the interface for locating objects by searching on the SQL Server:
 
 ![Code View Interface](/Wiki/Images/SqlToolsSearchInterface.png)
 
-Note that once you've queried the server, you can also filter/search within those results locally.
-
 Clicking the "Script" button gets the SQL object definition for that object and then displays it to you in this interface:
 
 ![Code View Interface](/Wiki/Images/SqlToolsCodeViewInterface.png)
@@ -46,6 +44,15 @@ I have come across tools that do similar things, but they had problems like:
 * They were very buggy
 * They tried to do too much and didn't have enough focus on just *finding stuff*
 * They were super-expensive
+
+## What else can it do?
+
+* When searching for objects:
+  * Supports auth via Windows or SQL login w/ username/password
+  * Allows you to filter/search objects 
+* When viewing object definition scripts
+  * Will format object code using [Poor Man's T-SQL Formatter](http://architectshack.com/PoorMansTSqlFormatter.ashx)
+  * Incremental find within object definition scripts.
 
 ## Requirements
 
