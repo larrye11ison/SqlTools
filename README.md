@@ -37,20 +37,28 @@ where t.name like '%something%'
 ```
 
 ...so I decided to make an application that would do this for me, with the added benefit of searching 
-across all databases on a server (if desired) as well as also searching within the object scripts as well.
+across all databases on a server (if desired) as well as also searching within the objects' definitions as well.
 
-I have come across tools that do similar things, but they had problems like:
+I have come across tools that do similar things, but they had one or more of the following problems:
 
 * They were very buggy
 * They tried to do too much and didn't have enough focus on just *finding stuff*
 * They were super-expensive
 
-## What else can it do?
+## Can you tell me other interesting facts about this thing?
 
+Sure, I've got nothing better to do...
+
+* Supports auth via Windows or SQL login with username/password
+* The app's icon is a totally awesome "recliner" - it makes your life so much easier, you'll have more time to relax in your easy chair
 * When searching for objects:
-  * Supports auth via Windows or SQL login w/ username/password
-  * Allows you to filter/search objects 
+  * Allows you to filter/search objects by object name, schema name and/or object definition
+  * Can search across individual DB's on a server or all of them
+  * Searching databases doesn't generally cause too much impact on the server
+  * Each database query is run asynchronously, so searching on a server with a large number of DB's will still happen quickly
+  * After you search, you can use somewhat sophisticated filtering techniques to narrow down those results
 * When viewing object definition scripts
+  * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
   * Will format object code using [Poor Man's T-SQL Formatter](http://architectshack.com/PoorMansTSqlFormatter.ashx)
   * Incremental find within object definition scripts.
 
