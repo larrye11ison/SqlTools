@@ -28,7 +28,7 @@ namespace SqlTools.DatabaseConnections
             Databases = new ObservableCollection<DatabaseViewModel>();
             CalculateValidity();
             Status = ConnectionStatus.Dormant;
-            SearchAcrossAllDatabases = true;
+            //SearchAcrossAllDatabases = true;
         }
 
         public bool CanEnumerateDatabases
@@ -98,30 +98,25 @@ namespace SqlTools.DatabaseConnections
 
         public string Password { get; set; }
 
-        public bool SearchAcrossAllDatabases { get; set; }
-
-        public bool SearchAcrossAllDatabasesNegated
-        {
-            get
-            {
-                return !SearchAcrossAllDatabases;
-            }
-        }
-
         public string ServerAndInstance { get; set; }
 
+        //public bool SearchAcrossAllDatabasesNegated
+        //{
+        //    get
+        //    {
+        //        return !SearchAcrossAllDatabases;
+        //    }
+        //}
         public ConnectionStatus Status { get; set; }
 
+        //public bool SearchAcrossAllDatabases { get; set; }
         public string UserName { get; set; }
 
-        public void ClearServerSearchParameters()
+        public void CheckAllDatabases()
         {
-            ObjectNameQuery = "";
-            ObjectDefinitionQuery = "";
-            ObjectSchemaQuery = "";
-            if (focusable != null)
+            foreach (var item in this.Databases)
             {
-                focusable.SetFocusOnMainControl();
+                item.IsSelected = true;
             }
         }
 
@@ -156,6 +151,7 @@ namespace SqlTools.DatabaseConnections
                 Databases.Clear();
                 foreach (var item in contextGetDatabases)
                 {
+                    item.IsSelected = true;
                     this.Databases.Add(item);
                 }
             }
@@ -181,7 +177,8 @@ namespace SqlTools.DatabaseConnections
             {
                 Status = ConnectionStatus.SearchingForObjects;
                 var ctx = new SchemaDBContext(this);
-                var dbeez = Databases.Where(db => SearchAcrossAllDatabases || db.IsSelected);
+                //var dbeez = Databases.Where(db => SearchAcrossAllDatabases || db.IsSelected);
+                var dbeez = Databases.Where(db => db.IsSelected);
                 Status = ConnectionStatus.SearchingForObjects;
                 if (ClearObjectsBeforeLoadingResults)
                 {
@@ -199,11 +196,33 @@ namespace SqlTools.DatabaseConnections
             }
         }
 
+        public void InitiateNewObjectSearchOnDatabase(bool clearSearchParameterFields = true)
+        {
+            if (clearSearchParameterFields)
+            {
+                ObjectNameQuery = "";
+                ObjectDefinitionQuery = "";
+                ObjectSchemaQuery = "";
+            }
+            if (focusable != null)
+            {
+                focusable.SetFocusOnMainControl();
+            }
+        }
+
         public void PasswordChanged(RoutedEventArgs rea)
         {
             Password = (rea.OriginalSource as PasswordBox).Password;
             NotifyOfPropertyChange(() => Password);
             CalculateValidity();
+        }
+
+        public void UncheckAllDatabases()
+        {
+            foreach (var item in this.Databases)
+            {
+                item.IsSelected = false;
+            }
         }
 
         protected override void OnViewLoaded(object view)

@@ -117,6 +117,12 @@ namespace SqlTools.Shell
             ScriptedObjects.InitiateFindText();
         }
 
+        public void GoToServerSearch()
+        {
+            ObjectSearchVisible = true;
+            this.ObjectSearch.InitializeNewObjectSearchForActiveDatabaseConnection();
+        }
+
         public void Handle(ShellMessage message)
         {
             string format = string.Format("{0}: {1}", message.Severity, message.MessageText);

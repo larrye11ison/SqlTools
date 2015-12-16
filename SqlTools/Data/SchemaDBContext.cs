@@ -19,10 +19,10 @@ namespace SqlTools.Data
     /// Manages the interactions with a database to get objects and script them out.
     /// </summary>
     /// <remarks>
-    /// There are some hard-coded queries below to get lists of databases, list of objects in a database, etc. 
+    /// There are some hard-coded queries below to get lists of databases, list of objects in a database, etc.
     /// I initially attempted to avoid this entirely by using SMO to handle all of this. However, it was often
     /// FAR too slow. This was in spite of my best efforts to use the stuff that SMO provides which theoretically
-    /// allow you to make it perform better like SetDefaultInitFields. I just couldn't get SMO to perform 
+    /// allow you to make it perform better like SetDefaultInitFields. I just couldn't get SMO to perform
     /// adequately no matter what I did.
     /// </remarks>
     internal class SchemaDBContext
@@ -105,6 +105,7 @@ namespace SqlTools.Data
 		                OR c.MatchingColumnCount > 0
 		                );
                                         ";
+
         /// <summary>
         /// The options used for the CREATE script.
         /// </summary>

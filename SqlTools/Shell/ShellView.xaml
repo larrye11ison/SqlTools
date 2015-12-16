@@ -43,6 +43,12 @@
             <stui:InputBindingTrigger.InputBinding>
                 <KeyBinding Key="F" Modifiers="Ctrl+Shift" />
             </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="GoToServerSearch" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="M" Modifiers="Ctrl" />
+            </stui:InputBindingTrigger.InputBinding>
             <cal:ActionMessage MethodName="ToggleSqlFormatOnCurrentDocument" />
         </stui:InputBindingTrigger>
         <stui:InputBindingTrigger>
@@ -83,6 +89,9 @@
                           Header="_Close Tab"
                           InputGestureText="Ctrl+W" />
                 <MenuItem x:Name="AddNewConnection" Header="_New Connection" />
+                <MenuItem x:Name="GoToServerSearch"
+                          Header="_Go to Server Search"
+                          InputGestureText="Ctrl+Shift+F" />
             </MenuItem>
             <MenuItem Header="_Edit">
                 <MenuItem Header="_Find in Code"
@@ -94,8 +103,8 @@
                 <MenuItem Header="Find _Previous in Code"
                           InputGestureText="Shift+F3"
                           cal:Message.Attach="FindPrevious" />
-                <MenuItem Header="Toggle SQL Formatting"
-                          InputGestureText="Shift+Control+F"
+                <MenuItem Header="Toggle SQL ForMatting"
+                          InputGestureText="Control+M"
                           cal:Message.Attach="ToggleSqlFormatOnCurrentDocument" />
             </MenuItem>
             <MenuItem Header="_View">

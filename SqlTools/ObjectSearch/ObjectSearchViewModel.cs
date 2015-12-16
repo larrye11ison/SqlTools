@@ -15,6 +15,14 @@ namespace SqlTools.ObjectSearch
 
         public DBSearchResultsViewModel SearchResults { get; set; }
 
+        public void InitializeNewObjectSearchForActiveDatabaseConnection()
+        {
+            if (Connections.ActiveItem != null)
+            {
+                Connections.ActiveItem.InitiateNewObjectSearchOnDatabase(false);
+            }
+        }
+
         protected override void OnInitialize()
         {
             base.OnInitialize();
