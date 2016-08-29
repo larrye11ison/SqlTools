@@ -220,6 +220,7 @@ namespace SqlTools.Data
             {
                 var srvConnect = new ServerConnection(cn);
                 var srv = new smo.Server(srvConnect);
+                srv.Refresh();
                 SetDefaultInitFields(srv);
                 smo.Database database = null;
                 StringBuilder sb = null;
@@ -285,8 +286,9 @@ namespace SqlTools.Data
                     {
                         sb.AppendFormat(@"-- {0} :: {1}.{2}.{3}{4}", so.server_name, so.db_name, so.schema_name, so.object_name, Environment.NewLine);
                         sb.AppendFormat(@"-- {0}{1}", so.type_desc, Environment.NewLine);
-                        sb.AppendFormat(@"-- Created: {0:yyyy-MM-dd HH\:mm\:ss}{1}", so.create_date, Environment.NewLine);
-                        sb.AppendFormat(@"-- LastMod: {0:yyyy-MM-dd HH\:mm\:ss}{1}", so.modify_date, Environment.NewLine);
+                        sb.AppendFormat(@"-- Script Created: {0:yyyy-MM-dd HH\:mm\:ss zz}{1}", DateTimeOffset.Now, Environment.NewLine);
+                        sb.AppendFormat(@"-- Object Created: {0:yyyy-MM-dd HH\:mm\:ss}{1}", so.create_date, Environment.NewLine);
+                        sb.AppendFormat(@"-- Object LastMod: {0:yyyy-MM-dd HH\:mm\:ss}{1}", so.modify_date, Environment.NewLine);
 
                         sb.AppendFormat("use {0}{1}go{1}", QuoteName(so.db_name), Environment.NewLine);
                         // Script the DROP surrounded by multiline comments
