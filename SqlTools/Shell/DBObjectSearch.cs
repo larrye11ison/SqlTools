@@ -26,7 +26,7 @@ namespace SqlTools.Shell
                 select m.Captures[0].Value;
 
             // start out with TRUE, all pieces below will be added as AND
-            var pred = PredicateBuilder.True<DBObjectViewModel>();
+            var pred = PredicateBuilder.New<DBObjectViewModel>();
 
             foreach (var filterChunk in filterParts)
             {

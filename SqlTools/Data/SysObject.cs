@@ -84,9 +84,28 @@ namespace SqlTools.Data
 
         public Urn Urn { get; set; }
 
-        public static IEnumerable<SysObject> MapFrom(IDataReader reader)
+        public static IEnumerable<SysObject> MapFrom(IDataReader rdr)
         {
-            return AutoMapper.Mapper.DynamicMap<IDataReader, List<SysObject>>(reader);
+            while (rdr.Read())
+            {
+                var rv = new SysObject
+                {
+                    db_name = rdr["db_name"].ToString(),
+                    create_date = Convert.ToDateTime(rdr["create_date"]),
+                    is_encrypted = Convert.ToBoolean(rdr["is_encrypted"]),
+                    modify_date = Convert.ToDateTime(rdr["modify_date"]),
+                    object_id = Convert.ToInt32(rdr["object_id"]),
+                    object_name = Convert.ToString(rdr["object_name"]),
+                    parent_object_name = Convert.ToString(rdr["parent_object_name"]),
+                    parent_object_schema_name = Convert.ToString(rdr["parent_object_schema_name"]),
+                    schema_name = Convert.ToString(rdr["schema_name"]),
+                    server_name = Convert.ToString(rdr["server_name"]),
+                    type_desc = Convert.ToString(rdr["type_desc"])
+                    //,
+                    //Urn = Convert.ToString(rdr["Urn"])
+                };
+                yield return rv;
+            }
         }
 
         public override bool Equals(object obj)

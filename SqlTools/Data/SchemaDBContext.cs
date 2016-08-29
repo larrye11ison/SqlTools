@@ -147,7 +147,7 @@ namespace SqlTools.Data
                     cmd.CommandType = CommandType.Text;
                     using (var rdr = await cmd.ExecuteReaderAsync())
                     {
-                        return AutoMapper.Mapper.DynamicMap<IDataReader, IEnumerable<DatabaseViewModel>>(rdr);
+                        return DatabaseViewModel.FromDataReader(rdr).ToArray();
                     }
                 }
             }

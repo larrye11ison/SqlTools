@@ -1,11 +1,11 @@
 ﻿using Caliburn.Micro;
-using System.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SqlTools.DatabaseConnections;
 using SqlTools.Scripting;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace SqlTools.Shell
@@ -71,24 +71,6 @@ namespace SqlTools.Shell
             return ToString().GetHashCode();
         }
 
-        private string StripCommentsFromSQL(string SQL)
-        {
-            return SQL;
-            TSql130Parser parser = new TSql130Parser(true);
-            IList<ParseError> errors;
-            var fragments = parser.Parse(new System.IO.StringReader(SQL), out errors);
-
-            // clear comments
-            string result = string.Join(
-              string.Empty,
-              fragments.ScriptTokenStream
-                  .Where(x => x.TokenType != TSqlTokenType.MultilineComment)
-                  .Where(x => x.TokenType != TSqlTokenType.SingleLineComment)
-                  .Select(x => x.Text));
-
-            return result;
-        }
-
         public async void ScriptObject()
         {
             var vm = this;
@@ -120,7 +102,8 @@ namespace SqlTools.Shell
 
                 // "Reset" the viewmodel with the actual object
                 firstNew.Initialize(so);
-                firstNew.SqlText = StripCommentsFromSQL(firstNew.SqlText);
+                //firstNew.SqlText = StripCommentsFromSQL(firstNew.SqlText);
+                firstNew.SqlText = firstNew.SqlText;
                 firstNew.IsLoadingDefinition = false;
                 firstNew.SetSqlFormat();
                 EventAggregator.PublishOnCurrentThread(firstNew);
@@ -146,6 +129,25 @@ namespace SqlTools.Shell
             var scriptedInfo = new ScriptedObjectInfo(objectDefinition, vm.SysObject);
 
             return scriptedInfo;
+        }
+
+        private string StripCommentsFromSQL(string SQL)
+        {
+            // Later on, we'll use this method to strip comments when doing comparisons
+
+            TSql130Parser parser = new TSql130Parser(true);
+            IList<ParseError> errors;
+            var fragments = parser.Parse(new System.IO.StringReader(SQL), out errors);
+
+            // clear comments
+            string result = string.Join(
+              string.Empty,
+              fragments.ScriptTokenStream
+                  .Where(x => x.TokenType != TSqlTokenType.MultilineComment)
+                  .Where(x => x.TokenType != TSqlTokenType.SingleLineComment)
+                  .Select(x => x.Text));
+
+            return result;
         }
     }
 }

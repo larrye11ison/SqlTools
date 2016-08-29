@@ -3,6 +3,7 @@ using SqlTools.Shell;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
+using System.Data;
 using System.IO;
 using System.IO.IsolatedStorage;
 using System.Linq;
@@ -104,8 +105,12 @@ namespace SqlTools.DatabaseConnections
             base.OnInitialize();
             eventAggregator.Subscribe(this);
 
-            AutoMapper.Mapper.CreateMap<SqlConnectionViewModel, SqlConnectionDto>();
-            AutoMapper.Mapper.CreateMap<SqlConnectionDto, SqlConnectionViewModel>();
+            AutoMapper.Mapper.Initialize(cfg =>
+            {
+                cfg.CreateMap<SqlConnectionViewModel, SqlConnectionDto>();
+                cfg.CreateMap<SqlConnectionDto, SqlConnectionViewModel>();
+                cfg.CreateMissingTypeMaps = true;
+            });
 
             foreach (var item in ConnectionsLoadFromStorage())
             {
