@@ -174,7 +174,7 @@ namespace SqlTools.DatabaseConnections
                 Status = ConnectionStatus.SearchingForObjects;
                 if (ClearObjectsBeforeLoadingResults)
                 {
-                    this.EventAggregator.PublishOnUIThread(new ClearDBObjectsResultsMessage());
+                    this.EventAggregator.PublishOnUIThreadAsync(new ClearDBObjectsResultsMessage());
                 }
                 await ctx.EnumerateObjectsInDatabases(this, dbeez, ObjectNameQuery, ObjectSchemaQuery, ObjectDefinitionQuery, EventAggregator);
             }

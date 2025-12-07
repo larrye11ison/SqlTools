@@ -3,13 +3,56 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ave="http://icsharpcode.net/sharpdevelop/avalonedit"
         xmlns:cal="http://www.caliburnproject.org"
-        xmlns:e="http://schemas.microsoft.com/expression/2010/interactivity"
-        xmlns:i="clr-namespace:System.Windows.Interactivity;assembly=System.Windows.Interactivity"
+        xmlns:i="http://schemas.microsoft.com/xaml/behaviors"
         xmlns:shell="clr-namespace:SqlTools.Shell"
         xmlns:stui="clr-namespace:SqlTools.UI"
         xmlns:vw="clr-namespace:SqlTools.Scripting"
         x:Name="thisScreen"
         Icon="/SqlTools;component/Media/AppIcon.ico">
+    <i:Interaction.Triggers>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="F7" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="CycleVisibility" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="F" Modifiers="Ctrl+Shift" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="GoToServerSearch" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="M" Modifiers="Ctrl" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="ToggleSqlFormatOnCurrentDocument" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="W" Modifiers="Ctrl" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="CloseCurrentDocument" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="F" Modifiers="Ctrl" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="FindText" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="F3" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="FindNext" />
+        </stui:InputBindingTrigger>
+        <stui:InputBindingTrigger>
+            <stui:InputBindingTrigger.InputBinding>
+                <KeyBinding Key="F3" Modifiers="Shift" />
+            </stui:InputBindingTrigger.InputBinding>
+            <cal:ActionMessage MethodName="FindPrevious" />
+        </stui:InputBindingTrigger>
+    </i:Interaction.Triggers>
     <Window.Resources>
         <Style x:Key="visibleWithObjectSearch" TargetType="FrameworkElement">
             <Style.Triggers>
@@ -32,50 +75,6 @@
             </Style.Triggers>
         </Style>
     </Window.Resources>
-    <i:Interaction.Triggers>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="F7" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="CycleVisibility" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="F" Modifiers="Ctrl+Shift" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="GoToServerSearch" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="M" Modifiers="Ctrl" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="ToggleSqlFormatOnCurrentDocument" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="W" Modifiers="Control" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="CloseCurrentDocument" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="F" Modifiers="Control" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="FindText" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="F3" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="FindNext" />
-        </stui:InputBindingTrigger>
-        <stui:InputBindingTrigger>
-            <stui:InputBindingTrigger.InputBinding>
-                <KeyBinding Key="F3" Modifiers="Shift" />
-            </stui:InputBindingTrigger.InputBinding>
-            <cal:ActionMessage MethodName="FindPrevious" />
-        </stui:InputBindingTrigger>
-    </i:Interaction.Triggers>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"  />

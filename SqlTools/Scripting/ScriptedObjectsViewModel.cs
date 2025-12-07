@@ -1,6 +1,8 @@
 ﻿using Caliburn.Micro;
 using System;
 using System.ComponentModel.Composition;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Media;
 
 namespace SqlTools.Scripting
@@ -56,19 +58,20 @@ namespace SqlTools.Scripting
             });
         }
 
-        public void Handle(FontFamily message)
+        public Task HandleAsync(FontFamily message, CancellationToken cancellationToken)
         {
             fontFamilyName = message.Source;
             foreach (var item in Items)
             {
                 item.SetFontFamily(message);
             }
+            return Task.CompletedTask;
         }
 
-        public void Handle(ScriptedObjectDocumentViewModel message)
+        public async Task HandleAsync(ScriptedObjectDocumentViewModel message, CancellationToken cancellationToken)
         {
             message.SetFontFamily(new FontFamily(fontFamilyName ?? "Lucida Console Regular"));
-            ActivateItem(message);
+            await ActivateItemAsync(message, cancellationToken);
         }
 
         public void InitiateFindText()
@@ -76,10 +79,10 @@ namespace SqlTools.Scripting
             DoItIfThereIsAnActiveItem(doc => doc.InitiateFindText());
         }
 
-        protected override void OnInitialize()
+        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
         {
-            base.OnInitialize();
-            eventagg.Subscribe(this);
+            eventagg.SubscribeOnPublishedThread(this);
+            return base.OnInitializeAsync(cancellationToken);
         }
 
         private void DoItIfThereIsAnActiveItem(Action<ScriptedObjectDocumentViewModel> theAction)

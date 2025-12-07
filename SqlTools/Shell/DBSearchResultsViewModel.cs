@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Diagnostics.Contracts;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SqlTools.Shell
 {
@@ -57,7 +59,7 @@ namespace SqlTools.Shell
             }
         }
 
-        public void Handle(EnumerateObjectsInDatabaseMessage dbMessage)
+        public Task HandleAsync(EnumerateObjectsInDatabaseMessage dbMessage, CancellationToken cancellationToken)
         {
             Contract.Requires(dbMessage != null, "dbMessage is null");
             Contract.Requires(dbMessage.DBObjects != null, "dbMessage.DBObjects is null");
@@ -67,7 +69,7 @@ namespace SqlTools.Shell
 
             if (newDBObjects == null)
             {
-                return;
+                return Task.CompletedTask;
             }
             lock (gawd)
             {
@@ -83,16 +85,19 @@ namespace SqlTools.Shell
                 }
             }
             ExecuteFilter();
+            return Task.CompletedTask;
         }
 
-        public void Handle(ObjectEnumerationStartingMessage message)
+        public Task HandleAsync(ObjectEnumerationStartingMessage message, CancellationToken cancellationToken)
         {
             actualList.Clear();
+            return Task.CompletedTask;
         }
 
-        public void Handle(ClearDBObjectsResultsMessage message)
+        public Task HandleAsync(ClearDBObjectsResultsMessage message, CancellationToken cancellationToken)
         {
             ClearResults();
+            return Task.CompletedTask;
         }
 
         public void ResultsFilterChanged(string filterText)

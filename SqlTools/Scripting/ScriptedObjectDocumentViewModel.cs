@@ -8,6 +8,8 @@ using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.Reactive.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Xml;
@@ -467,10 +469,14 @@ namespace SqlTools.Scripting
             return CanonicalName;
         }
 
-        public override void TryClose(bool? dialogResult = null)
+        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
         {
-            findTextChangedSubscription?.Dispose();
-            sqlTextPropChangedSub?.Dispose();
+            if (close)
+            {
+                findTextChangedSubscription?.Dispose();
+                sqlTextPropChangedSub?.Dispose();
+            }
+            return base.OnDeactivateAsync(close, cancellationToken);
         }
 
         private FontFamily font = null;

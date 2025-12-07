@@ -7,6 +7,8 @@ using System.Data;
 using System.IO;
 using System.IO.IsolatedStorage;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Xml.Serialization;
@@ -54,7 +56,7 @@ namespace SqlTools.DatabaseConnections
         {
             var newvm = IoC.Get<SqlConnectionViewModel>();
             Items.Add(newvm);
-            ActivateItem(newvm);
+            ActivateItemAsync(newvm, CancellationToken.None);
         }
 
         public void ConnectionsSaveToStorage()
@@ -90,7 +92,7 @@ namespace SqlTools.DatabaseConnections
             }
             catch (Exception e)
             {
-                eventAggregator.PublishOnCurrentThread(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
+                eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
             }
         }
 
@@ -107,27 +109,30 @@ namespace SqlTools.DatabaseConnections
         /// Message published when user picks a new font from the Font Chooser dialogue.
         /// </summary>
         /// <param name="message"></param>
-        public void Handle(FontFamily message)
+        /// <param name="cancellationToken"></param>
+        public Task HandleAsync(FontFamily message, CancellationToken cancellationToken)
         {
             this.font = message;
+            return Task.CompletedTask;
         }
 
-        protected override void OnDeactivate(bool close)
+        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
         {
             ConnectionsSaveToStorage();
-            base.OnDeactivate(close);
+            return base.OnDeactivateAsync(close, cancellationToken);
         }
 
-        protected override void OnInitialize()
+        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
         {
-            base.OnInitialize();
-            eventAggregator.Subscribe(this);
+            eventAggregator.SubscribeOnPublishedThread(this);
 
             foreach (var item in ConnectionsLoadFromStorage())
             {
                 Items.Add(item);
             }
             ActiveItem = Items.FirstOrDefault();
+            
+            return base.OnInitializeAsync(cancellationToken);
         }
 
         protected override void OnViewLoaded(object view)
@@ -166,11 +171,11 @@ namespace SqlTools.DatabaseConnections
 
                 // make sure the stuff handling the SQL Code knows which font to use
                 var fam = new FontFamily(appSettings.FontFamilyName);
-                eventAggregator.PublishOnCurrentThread(fam);
+                eventAggregator.PublishOnUIThreadAsync(fam);
             }
             catch (Exception e)
             {
-                eventAggregator.PublishOnCurrentThread(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
+                eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
                 vmcoll.Clear();
                 var newvm = IoC.Get<SqlConnectionViewModel>();
                 newvm.ServerAndInstance = "SERVER";

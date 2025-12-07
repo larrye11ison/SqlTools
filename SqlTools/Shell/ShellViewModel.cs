@@ -2,6 +2,8 @@ using Caliburn.Micro;
 using SqlTools.ObjectSearch;
 using SqlTools.Scripting;
 using System.ComponentModel.Composition;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SqlTools.Shell
 {
@@ -53,7 +55,7 @@ namespace SqlTools.Shell
 
         public void ActivateDocument(ScriptedObjectDocumentViewModel scriptedObject)
         {
-            ScriptedObjects.ActivateItem(scriptedObject);
+            ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
         }
 
         public void AddNewConnection()
@@ -79,7 +81,7 @@ namespace SqlTools.Shell
             var res = turd.ShowDialog();
             if (turd.DialogResult.HasValue && turd.DialogResult.Value)
             {
-                EventAggregator.PublishOnCurrentThread(turd.SelectedFontFamily);
+                EventAggregator.PublishOnUIThreadAsync(turd.SelectedFontFamily);
             }
         }
 
@@ -123,21 +125,23 @@ namespace SqlTools.Shell
             this.ObjectSearch.InitializeNewObjectSearchForActiveDatabaseConnection();
         }
 
-        public void Handle(ShellMessage message)
+        public Task HandleAsync(ShellMessage message, CancellationToken cancellationToken)
         {
             string format = string.Format("{0}: {1}", message.Severity, message.MessageText);
             System.Diagnostics.Debug.WriteLine(format);
+            return Task.CompletedTask;
         }
 
-        public void Handle(ScriptedObjectDocumentViewModel message)
+        public Task HandleAsync(ScriptedObjectDocumentViewModel message, CancellationToken cancellationToken)
         {
             ObjectSearchVisible = false;
+            return Task.CompletedTask;
         }
 
         public void OpenDocument(ScriptedObjectDocumentViewModel scriptedObject)
         {
             ScriptedObjects.Items.Add(scriptedObject);
-            ScriptedObjects.ActivateItem(scriptedObject);
+            ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
             if (ObjectSearchVisible)
             {
                 ObjectSearchVisible = false;
@@ -149,11 +153,9 @@ namespace SqlTools.Shell
             ScriptedObjects.ActiveItem.ToggleSqlFormat();
         }
 
-        protected override void OnInitialize()
+        protected override async Task OnInitializeAsync(CancellationToken cancellationToken)
         {
-            base.OnInitialize();
-
-            EventAggregator.Subscribe(this);
+            EventAggregator.SubscribeOnPublishedThread(this);
 
             DisplayName = "SQL Tools";
             ObjectSearchVisible = true;
@@ -161,8 +163,10 @@ namespace SqlTools.Shell
             // set up the child viewmodels
             ScriptedObjects = IoC.Get<ScriptedObjectsViewModel>();
             ObjectSearch = IoC.Get<ObjectSearchViewModel>();
-            ActivateItem(ScriptedObjects);
-            ActivateItem(ObjectSearch);
+            await ActivateItemAsync(ScriptedObjects, cancellationToken);
+            await ActivateItemAsync(ObjectSearch, cancellationToken);
+            
+            await base.OnInitializeAsync(cancellationToken);
         }
     }
 }

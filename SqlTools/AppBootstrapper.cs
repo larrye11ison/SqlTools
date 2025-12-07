@@ -82,9 +82,9 @@ namespace SqlTools
             throw new Exception(string.Format("Could not locate any instances of contract {0}.", contract));
         }
 
-        protected override void OnStartup(object sender, StartupEventArgs e)
+        protected override async void OnStartup(object sender, StartupEventArgs e)
         {
-            DisplayRootViewFor<IShell>();
+            await DisplayRootViewForAsync<IShell>();
         }
     }
 }

@@ -2,6 +2,8 @@
 using SqlTools.DatabaseConnections;
 using SqlTools.Shell;
 using System.ComponentModel.Composition;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SqlTools.ObjectSearch
 {
@@ -23,15 +25,15 @@ namespace SqlTools.ObjectSearch
             }
         }
 
-        protected override void OnInitialize()
+        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
         {
-            base.OnInitialize();
-
             // set up the child viewmodels
             SearchResults = IoC.Get<DBSearchResultsViewModel>();
             Connections = IoC.Get<DatabaseConnectionsViewModel>();
             SearchResults.ConductWith(this);
             Connections.ConductWith(this);
+            
+            return base.OnInitializeAsync(cancellationToken);
         }
     }
 }

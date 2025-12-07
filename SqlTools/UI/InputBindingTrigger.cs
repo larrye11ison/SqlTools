@@ -2,10 +2,12 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interactivity;
+using System.Windows.Markup;
+using Microsoft.Xaml.Behaviors;
 
 namespace SqlTools.UI
 {
+    [ContentProperty(nameof(Actions))]
     public class InputBindingTrigger : TriggerBase<FrameworkElement>, ICommand
     {
         public static readonly DependencyProperty InputBindingProperty =

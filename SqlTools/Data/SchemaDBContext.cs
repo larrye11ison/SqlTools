@@ -169,7 +169,7 @@ namespace SqlTools.Data
 
             var tasks = new List<Task>();
 
-            eventAggregator.PublishOnUIThread(new ObjectEnumerationStartingMessage());
+            eventAggregator.PublishOnUIThreadAsync(new ObjectEnumerationStartingMessage());
 
             foreach (var db in databases)
             {
@@ -198,14 +198,14 @@ namespace SqlTools.Data
                                     var objects = SysObject.MapFrom(result).ToArray();
 
                                     var message = new EnumerateObjectsInDatabaseMessage(ConnectionViewModel, objects, db.db_name, connection.ServerAndInstance);
-                                    eventAggregator.PublishOnUIThread(message);
+                                    eventAggregator.PublishOnUIThreadAsync(message);
                                 }
                             }
                         }
                         catch (Exception ex)
                         {
                             connection.ErrorMessage = ex.ToString();
-                            eventAggregator.PublishOnUIThread(ex);
+                            eventAggregator.PublishOnUIThreadAsync(ex);
                         }
                     }, TaskCreationOptions.LongRunning);
                 tasks.Add(t);
