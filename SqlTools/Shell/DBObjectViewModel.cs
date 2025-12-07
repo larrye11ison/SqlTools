@@ -121,7 +121,7 @@ namespace SqlTools.Shell
             }
         }
 
-        private async static Task<ScriptedObjectInfo> GetScriptedObject(DBObjectViewModel vm)
+        private static async Task<ScriptedObjectInfo> GetScriptedObject(DBObjectViewModel vm)
         {
             var ctx = new Data.SchemaDBContext(vm.ConnectionViewModel);
             var objectDefinition = await ctx.GetObjectDefinition(vm.SysObject);

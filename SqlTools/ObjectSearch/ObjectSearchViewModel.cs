@@ -32,7 +32,7 @@ namespace SqlTools.ObjectSearch
             Connections = IoC.Get<DatabaseConnectionsViewModel>();
             SearchResults.ConductWith(this);
             Connections.ConductWith(this);
-            
+
             return base.OnInitializeAsync(cancellationToken);
         }
     }

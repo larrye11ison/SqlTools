@@ -12,10 +12,10 @@ namespace SqlTools.Shell
     public class DBObjectSearch
     {
         // breaks the search text into chunks
-        private readonly static Regex chunker = new Regex(@"(?<chunk>[a-z_:!]+)",
+        private static readonly Regex chunker = new Regex(@"(?<chunk>[a-z_:!]+)",
             RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
 
-        private readonly static StringComparison comparisonType = StringComparison.InvariantCultureIgnoreCase;
+        private static readonly StringComparison comparisonType = StringComparison.InvariantCultureIgnoreCase;
 
         public static Expression<Func<DBObjectViewModel, bool>> BuildPredicateFromSearchText(string filterText)
         {

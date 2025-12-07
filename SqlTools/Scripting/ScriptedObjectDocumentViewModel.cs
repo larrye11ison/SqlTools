@@ -2,22 +2,22 @@
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SqlTools.Shell;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Reactive.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Xml;
-using Microsoft.SqlServer.TransactSql.ScriptDom;
-using System.IO;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace SqlTools.Scripting
 {
@@ -37,8 +37,10 @@ namespace SqlTools.Scripting
         private IEventAggregator eventagg = null;
 
         private TextBox findTextBox;
+
         // TODO: get rid of the disposables when closing the document
         private IDisposable findTextChangedSubscription;
+
         private IDisposable sqlTextPropChangedSub;
 
         public ScriptedObjectDocumentViewModel()
@@ -47,7 +49,8 @@ namespace SqlTools.Scripting
             FindText = new FindTextViewModel("");
         }
 
-        private enum TextSearchDirection { Forwards, Backwards }
+        private enum TextSearchDirection
+        { Forwards, Backwards }
 
         public string CanonicalName { get; set; }
 
@@ -98,7 +101,8 @@ namespace SqlTools.Scripting
 
         public string SqlText { get; set; }
 
-        public string Title { get { return DisplayName; } }
+        public string Title
+        { get { return DisplayName; } }
 
         public string TypeDescription { get; set; }
 
@@ -113,10 +117,10 @@ namespace SqlTools.Scripting
                 using (var stream = type.Assembly.GetManifestResourceStream(fullName))
                 {
                     if (stream != null)
-                    using (var reader = new XmlTextReader(stream))
-                    {
-                        hl = HighlightingLoader.Load(reader, HighlightingManager.Instance);
-                    }
+                        using (var reader = new XmlTextReader(stream))
+                        {
+                            hl = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+                        }
                 }
             }
             catch
@@ -223,41 +227,41 @@ namespace SqlTools.Scripting
                 var parser = new TSql160Parser(false);
                 IList<ParseError> errors;
                 TSqlFragment fragment;
-                
+
                 using (var reader = new StringReader(sql))
                 {
                     fragment = parser.Parse(reader, out errors);
                 }
-                
+
                 if (errors != null && errors.Count > 0)
                     throw new Exception($"SQL Parsing Error: {errors[0].Message}");
-                
+
                 var tokens = fragment.ScriptTokenStream;
                 if (tokens == null || tokens.Count == 0)
                     return sql;
-                
+
                 // Walk the token stream and apply formatting + OR ALTER injection
                 var result = new StringBuilder();
                 int indentLevel = 0;
                 bool lineStart = true;
-                
+
                 for (int i = 0; i < tokens.Count; i++)
                 {
                     var token = tokens[i];
-                    
+
                     // Check if this is a CREATE keyword followed by PROCEDURE/FUNCTION/VIEW/TRIGGER
                     if (token.TokenType == TSqlTokenType.Create)
                     {
                         // Find next significant token (skip whitespace/comments) to CHECK what type
                         int nextSignificantIndex = i + 1;
-                        while (nextSignificantIndex < tokens.Count && 
+                        while (nextSignificantIndex < tokens.Count &&
                                (tokens[nextSignificantIndex].TokenType == TSqlTokenType.WhiteSpace ||
                                 tokens[nextSignificantIndex].TokenType == TSqlTokenType.MultilineComment ||
                                 tokens[nextSignificantIndex].TokenType == TSqlTokenType.SingleLineComment))
                         {
                             nextSignificantIndex++;
                         }
-                        
+
                         if (nextSignificantIndex < tokens.Count)
                         {
                             var significantToken = tokens[nextSignificantIndex];
@@ -273,7 +277,7 @@ namespace SqlTools.Scripting
                                     lineStart = false;
                                 }
                                 result.Append("CREATE OR ALTER");
-                                
+
                                 // Now output all the tokens between CREATE and the object type
                                 // (this includes any comments or whitespace that appeared there)
                                 for (int j = i + 1; j < nextSignificantIndex; j++)
@@ -301,14 +305,14 @@ namespace SqlTools.Scripting
                                         result.Append(interveningToken.Text);
                                     }
                                 }
-                                
+
                                 // Skip to just before the object type keyword (we'll process it normally next iteration)
                                 i = nextSignificantIndex - 1;
                                 continue;
                             }
                         }
                     }
-                    
+
                     // Apply formatting rules based on token type
                     switch (token.TokenType)
                     {
@@ -324,7 +328,7 @@ namespace SqlTools.Scripting
                                 result.Append(" ");
                             }
                             break;
-                            
+
                         case TSqlTokenType.SingleLineComment:
                         case TSqlTokenType.MultilineComment:
                             // Preserve comments as-is
@@ -335,7 +339,7 @@ namespace SqlTools.Scripting
                             }
                             result.Append(token.Text);
                             break;
-                            
+
                         default:
                             // Apply indentation if at start of line
                             if (lineStart)
@@ -343,7 +347,7 @@ namespace SqlTools.Scripting
                                 result.Append(new string(' ', indentLevel * 4));
                                 lineStart = false;
                             }
-                            
+
                             // Apply keyword casing
                             if (IsKeyword(token.TokenType))
                             {
@@ -353,7 +357,7 @@ namespace SqlTools.Scripting
                             {
                                 result.Append(token.Text);
                             }
-                            
+
                             // Track indentation for BEGIN/END blocks
                             if (token.TokenType == TSqlTokenType.Begin)
                             {
@@ -366,7 +370,7 @@ namespace SqlTools.Scripting
                             break;
                     }
                 }
-                
+
                 return result.ToString();
             }
             catch (Exception ex)
@@ -375,7 +379,7 @@ namespace SqlTools.Scripting
                 return sql;
             }
         }
-        
+
         private bool IsKeyword(TSqlTokenType tokenType)
         {
             // Return true for SQL keywords that should be uppercased
@@ -436,11 +440,12 @@ namespace SqlTools.Scripting
                 case TSqlTokenType.Execute:
                 case TSqlTokenType.Exec:
                     return true;
+
                 default:
                     return false;
             }
         }
-        
+
         public void TextSearch(string c)
         {
             Debug.WriteLine("Searching for: " + c);

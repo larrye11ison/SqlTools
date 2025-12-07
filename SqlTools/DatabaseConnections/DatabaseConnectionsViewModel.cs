@@ -1,4 +1,6 @@
-﻿using Caliburn.Micro;
+﻿using AutoMapper;
+using Caliburn.Micro;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlTools.Shell;
 using System;
 using System.Collections.Generic;
@@ -12,8 +14,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Xml.Serialization;
-using AutoMapper;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SqlTools.DatabaseConnections
 {
@@ -131,7 +131,7 @@ namespace SqlTools.DatabaseConnections
                 Items.Add(item);
             }
             ActiveItem = Items.FirstOrDefault();
-            
+
             return base.OnInitializeAsync(cancellationToken);
         }
 

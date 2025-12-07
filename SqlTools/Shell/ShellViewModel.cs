@@ -165,7 +165,7 @@ namespace SqlTools.Shell
             ObjectSearch = IoC.Get<ObjectSearchViewModel>();
             await ActivateItemAsync(ScriptedObjects, cancellationToken);
             await ActivateItemAsync(ObjectSearch, cancellationToken);
-            
+
             await base.OnInitializeAsync(cancellationToken);
         }
     }

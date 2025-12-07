@@ -219,7 +219,7 @@ namespace SqlTools.Data
         {
             var connectionString = ConnectionViewModel.ConnectionString();
             var csBuilder = new SqlConnectionStringBuilder(connectionString);
-            
+
             // Create SqlConnectionInfo from the connection string to preserve all properties including protocol
             var connInfo = new SqlConnectionInfo();
             connInfo.ServerName = csBuilder.DataSource;
@@ -231,10 +231,10 @@ namespace SqlTools.Data
                 connInfo.Password = csBuilder.Password;
             }
             connInfo.ConnectionTimeout = csBuilder.ConnectTimeout;
-            
+
             var srvConnect = new ServerConnection(connInfo);
             var srv = new smo.Server(srvConnect);
-            
+
             try
             {
                 srv.Refresh();

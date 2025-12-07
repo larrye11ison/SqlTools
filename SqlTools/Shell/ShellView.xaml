@@ -77,10 +77,10 @@
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"  />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
 			<RowDefinition Height="Auto" MinHeight="20" />
-			<RowDefinition Height="Auto" MinHeight="20"/>
+			<RowDefinition Height="Auto" MinHeight="20" />
         </Grid.RowDefinitions>
         <Menu>
             <MenuItem Header="_File">

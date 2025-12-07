@@ -5,8 +5,8 @@ using System.Linq;
 
 namespace SqlTools.Shell
 {
-    public class ObjectEnumerationStartingMessage { }
-
+    public class ObjectEnumerationStartingMessage
+    { }
 
     /// <summary>
     /// Fired when a search comes back from a SQL Server containing the initial search results.
