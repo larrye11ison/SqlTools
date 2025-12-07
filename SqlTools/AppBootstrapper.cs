@@ -84,7 +84,21 @@ namespace SqlTools
 
         protected override async void OnStartup(object sender, StartupEventArgs e)
         {
-            await DisplayRootViewForAsync<IShell>();
+            try
+            {
+                await DisplayRootViewForAsync<IShell>();
+            }
+            catch (Exception ex)
+            {
+                var log = LogManager.GetLog(typeof(AppBootstrapper));
+                log.Error(ex);
+                MessageBox.Show(
+                    $"Application startup failed: {ex.Message}\n\nSee log for details.", 
+                    "Startup Error", 
+                    MessageBoxButton.OK, 
+                    MessageBoxImage.Error);
+                Application.Current.Shutdown(-1);
+            }
         }
     }
 }

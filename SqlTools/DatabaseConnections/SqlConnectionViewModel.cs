@@ -157,7 +157,7 @@ namespace SqlTools.DatabaseConnections
             }
         }
 
-        public async void EnumerateObjects()
+        public async Task EnumerateObjects()
         {
             if (this.Databases == null || this.Databases.Count == 0)
             {
@@ -174,7 +174,7 @@ namespace SqlTools.DatabaseConnections
                 Status = ConnectionStatus.SearchingForObjects;
                 if (ClearObjectsBeforeLoadingResults)
                 {
-                    this.EventAggregator.PublishOnUIThreadAsync(new ClearDBObjectsResultsMessage());
+                    await this.EventAggregator.PublishOnUIThreadAsync(new ClearDBObjectsResultsMessage());
                 }
                 await ctx.EnumerateObjectsInDatabases(this, dbeez, ObjectNameQuery, ObjectSchemaQuery, ObjectDefinitionQuery, EventAggregator);
             }

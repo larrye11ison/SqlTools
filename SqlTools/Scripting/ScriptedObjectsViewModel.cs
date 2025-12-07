@@ -79,10 +79,10 @@ namespace SqlTools.Scripting
             DoItIfThereIsAnActiveItem(doc => doc.InitiateFindText());
         }
 
-        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
+        protected override Task OnInitializedAsync(CancellationToken cancellationToken)
         {
             eventagg.SubscribeOnPublishedThread(this);
-            return base.OnInitializeAsync(cancellationToken);
+            return base.OnInitializedAsync(cancellationToken);
         }
 
         private void DoItIfThereIsAnActiveItem(Action<ScriptedObjectDocumentViewModel> theAction)

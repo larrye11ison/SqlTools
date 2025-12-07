@@ -71,7 +71,7 @@ namespace SqlTools.Shell
             return ToString().GetHashCode();
         }
 
-        public async void ScriptObject()
+        public async Task ScriptObject()
         {
             var vm = this;
 
@@ -95,7 +95,7 @@ namespace SqlTools.Shell
 
                 firstNew.IsLoadingDefinition = true;
                 firstNew.SetSqlFormat();
-                EventAggregator.PublishOnUIThreadAsync(firstNew);
+                _ = EventAggregator.PublishOnUIThreadAsync(firstNew);
                 //shell.OpenDocument(firstNew);
 
                 var so = await GetScriptedObject(vm);
@@ -106,14 +106,14 @@ namespace SqlTools.Shell
                 firstNew.SqlText = firstNew.SqlText;
                 firstNew.IsLoadingDefinition = false;
                 firstNew.SetSqlFormat();
-                EventAggregator.PublishOnUIThreadAsync(firstNew);
+                _ = EventAggregator.PublishOnUIThreadAsync(firstNew);
                 //shell.ActivateDocument(firstNew);
             }
             catch (Exception ex)
             {
                 firstNew.DisplayName = "ERROR - " + firstNew.DisplayName;
                 firstNew.SqlText += string.Format("Error scripting object:{0}{1}", Environment.NewLine, ex);
-                EventAggregator.PublishOnUIThreadAsync(new ShellMessage
+                _ = EventAggregator.PublishOnUIThreadAsync(new ShellMessage
                 {
                     Severity = Severity.Warning,
                     MessageText = string.Format("Error scripting object {0}:{1}{2}", vm.SysObject.full_name, Environment.NewLine, ex)

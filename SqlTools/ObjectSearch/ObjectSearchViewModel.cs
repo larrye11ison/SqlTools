@@ -25,7 +25,7 @@ namespace SqlTools.ObjectSearch
             }
         }
 
-        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
+        protected override Task OnInitializedAsync(CancellationToken cancellationToken)
         {
             // set up the child viewmodels
             SearchResults = IoC.Get<DBSearchResultsViewModel>();
@@ -33,7 +33,7 @@ namespace SqlTools.ObjectSearch
             SearchResults.ConductWith(this);
             Connections.ConductWith(this);
 
-            return base.OnInitializeAsync(cancellationToken);
+            return base.OnInitializedAsync(cancellationToken);
         }
     }
 }

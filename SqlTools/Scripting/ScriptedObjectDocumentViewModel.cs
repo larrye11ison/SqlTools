@@ -290,7 +290,7 @@ namespace SqlTools.Scripting
                 .SubscribeOnDispatcher()
                 .Subscribe(_ => FindText = new FindTextViewModel(SqlText));
 
-            eventagg?.Subscribe(this);
+            eventagg?.SubscribeOnPublishedThread(this);
         }
 
         private string CanonicalFormatSql(string sql)

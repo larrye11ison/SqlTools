@@ -55,7 +55,7 @@ namespace SqlTools.Shell
 
         public void ActivateDocument(ScriptedObjectDocumentViewModel scriptedObject)
         {
-            ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
+            _ = ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
         }
 
         public void AddNewConnection()
@@ -81,7 +81,7 @@ namespace SqlTools.Shell
             var res = turd.ShowDialog();
             if (turd.DialogResult.HasValue && turd.DialogResult.Value)
             {
-                EventAggregator.PublishOnUIThreadAsync(turd.SelectedFontFamily);
+                _ = EventAggregator.PublishOnUIThreadAsync(turd.SelectedFontFamily);
             }
         }
 
@@ -141,7 +141,7 @@ namespace SqlTools.Shell
         public void OpenDocument(ScriptedObjectDocumentViewModel scriptedObject)
         {
             ScriptedObjects.Items.Add(scriptedObject);
-            ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
+            _ = ScriptedObjects.ActivateItemAsync(scriptedObject, CancellationToken.None);
             if (ObjectSearchVisible)
             {
                 ObjectSearchVisible = false;
@@ -153,7 +153,7 @@ namespace SqlTools.Shell
             ScriptedObjects.ActiveItem.ToggleSqlFormat();
         }
 
-        protected override async Task OnInitializeAsync(CancellationToken cancellationToken)
+        protected override async Task OnInitializedAsync(CancellationToken cancellationToken)
         {
             EventAggregator.SubscribeOnPublishedThread(this);
 
@@ -166,7 +166,7 @@ namespace SqlTools.Shell
             await ActivateItemAsync(ScriptedObjects, cancellationToken);
             await ActivateItemAsync(ObjectSearch, cancellationToken);
 
-            await base.OnInitializeAsync(cancellationToken);
+            await base.OnInitializedAsync(cancellationToken);
         }
     }
 }

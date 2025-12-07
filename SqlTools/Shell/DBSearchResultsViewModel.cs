@@ -31,7 +31,7 @@ namespace SqlTools.Shell
             Contract.Ensures(DatabaseObjects != null);
             DatabaseObjects = new BindableCollection<DBObjectViewModel>();
             eventAgg = eventAggregator;
-            eventAggregator.Subscribe(this);
+            eventAggregator.SubscribeOnPublishedThread(this);
         }
 
         public System.Windows.Input.ICommand CloseCommand
@@ -47,7 +47,7 @@ namespace SqlTools.Shell
 
         public static void ScriptTheObject(DBObjectViewModel vm)
         {
-            vm.ScriptObject();
+            _ = vm.ScriptObject();
         }
 
         public void ClearResults()

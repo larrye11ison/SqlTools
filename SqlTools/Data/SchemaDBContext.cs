@@ -169,7 +169,7 @@ namespace SqlTools.Data
 
             var tasks = new List<Task>();
 
-            eventAggregator.PublishOnUIThreadAsync(new ObjectEnumerationStartingMessage());
+            _ = eventAggregator.PublishOnUIThreadAsync(new ObjectEnumerationStartingMessage());
 
             foreach (var db in databases)
             {

@@ -37,7 +37,7 @@ namespace SqlTools.Shell
                 if (turd != null && turd.CanScriptObject)
                 {
                     e.Handled = true;
-                    turd.ScriptObject();
+                    _ = turd.ScriptObject();
                 }
             }
         }

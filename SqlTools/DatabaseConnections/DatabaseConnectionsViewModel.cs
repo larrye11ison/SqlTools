@@ -56,7 +56,7 @@ namespace SqlTools.DatabaseConnections
         {
             var newvm = IoC.Get<SqlConnectionViewModel>();
             Items.Add(newvm);
-            ActivateItemAsync(newvm, CancellationToken.None);
+            _ = ActivateItemAsync(newvm, CancellationToken.None);
         }
 
         public void ConnectionsSaveToStorage()
@@ -92,7 +92,7 @@ namespace SqlTools.DatabaseConnections
             }
             catch (Exception e)
             {
-                eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
+                _ = eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
             }
         }
 
@@ -122,7 +122,7 @@ namespace SqlTools.DatabaseConnections
             return base.OnDeactivateAsync(close, cancellationToken);
         }
 
-        protected override Task OnInitializeAsync(CancellationToken cancellationToken)
+        protected override Task OnInitializedAsync(CancellationToken cancellationToken)
         {
             eventAggregator.SubscribeOnPublishedThread(this);
 
@@ -132,7 +132,7 @@ namespace SqlTools.DatabaseConnections
             }
             ActiveItem = Items.FirstOrDefault();
 
-            return base.OnInitializeAsync(cancellationToken);
+            return base.OnInitializedAsync(cancellationToken);
         }
 
         protected override void OnViewLoaded(object view)
@@ -171,11 +171,11 @@ namespace SqlTools.DatabaseConnections
 
                 // make sure the stuff handling the SQL Code knows which font to use
                 var fam = new FontFamily(appSettings.FontFamilyName);
-                eventAggregator.PublishOnUIThreadAsync(fam);
+                _ = eventAggregator.PublishOnUIThreadAsync(fam);
             }
             catch (Exception e)
             {
-                eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
+                _ = eventAggregator.PublishOnUIThreadAsync(new ShellMessage { MessageText = e.ToString(), Severity = Severity.Warning });
                 vmcoll.Clear();
                 var newvm = IoC.Get<SqlConnectionViewModel>();
                 newvm.ServerAndInstance = "SERVER";
