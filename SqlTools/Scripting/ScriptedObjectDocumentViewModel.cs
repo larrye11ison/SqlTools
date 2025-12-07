@@ -6,10 +6,15 @@ using SqlTools.Shell;
 using System;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
+using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Xml;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SqlTools.Scripting
 {
@@ -18,24 +23,19 @@ namespace SqlTools.Scripting
     /// </summary>
     [Export]
     [PartCreationPolicy(CreationPolicy.NonShared)]
-    public class ScriptedObjectDocumentViewModel : Screen, IDocument//, IHandle<FontFamily>
+    public class ScriptedObjectDocumentViewModel : Screen, IDocument //, IHandle<FontFamily>
     {
-        private SearchResultsHighlight _curentResultsHighlight;
-
+        private SearchResultsHighlight _currentResultsHighlight;
         private SearchResultsHighlight _generalHighlight;
-
         private string _originalSqlText;
-
         private TextEditor editor;
 
         [Import]
         private IEventAggregator eventagg = null;
 
         private TextBox findTextBox;
-
         // TODO: get rid of the disposables when closing the document
         private IDisposable findTextChangedSubscription;
-
         private IDisposable sqlTextPropChangedSub;
 
         public ScriptedObjectDocumentViewModel()
@@ -44,11 +44,7 @@ namespace SqlTools.Scripting
             FindText = new FindTextViewModel("");
         }
 
-        private enum TextSearchDirection
-        {
-            Forwards,
-            Backwards
-        }
+        private enum TextSearchDirection { Forwards, Backwards }
 
         public string CanonicalName { get; set; }
 
@@ -77,20 +73,10 @@ namespace SqlTools.Scripting
                         iconPath = "/Media/storedprocedure.png";
                         break;
 
-                    case "PRIMARY_KEY_CONSTRAINT":
-                    case "DEFAULT_CONSTRAINT":
-                    case "UNIQUE_CONSTRAINT":
-                    case "CHECK_CONSTRAINT":
-                    case "FOREIGN_KEY_CONSTRAINT":
-                        break;
-
                     case "INTERNAL_TABLE":
                     case "SYSTEM_TABLE":
                     case "USER_TABLE":
                         iconPath = "/Media/table.png";
-                        break;
-
-                    case "SERVICE_QUEUE":
                         break;
 
                     case "SQL_TRIGGER":
@@ -101,8 +87,7 @@ namespace SqlTools.Scripting
                         iconPath = "/Media/view.png";
                         break;
                 }
-                var rv = new System.Uri(iconPath, System.UriKind.Relative);
-                return rv;
+                return new System.Uri(iconPath, System.UriKind.Relative);
             }
         }
 
@@ -119,63 +104,69 @@ namespace SqlTools.Scripting
             var type = typeof(ScriptedObjectDocumentViewModel);
             var fullName = type.Namespace + ".tsql.xshd";
 
-            IHighlightingDefinition hl;
-            using (var stream = type.Assembly.GetManifestResourceStream(fullName))
+            IHighlightingDefinition hl = null;
+            try
             {
-                using (var reader = new XmlTextReader(stream))
+                using (var stream = type.Assembly.GetManifestResourceStream(fullName))
                 {
-                    hl = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+                    if (stream != null)
+                    using (var reader = new XmlTextReader(stream))
+                    {
+                        hl = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+                    }
                 }
             }
+            catch
+            {
+                // ignore highlighting errors
+            }
 
-            this.editor.SyntaxHighlighting = hl;
+            if (hl != null && editor != null)
+                editor.SyntaxHighlighting = hl;
 
-            // AvalonEdit is NOT able to bind its Text property, so we have to JAM it in there...
-            editor.Text = SqlText;
-            SqlText = _originalSqlText;
-            FindText = new FindTextViewModel(SqlText);
+            // AvalonEdit cannot bind Text directly
+            if (editor != null) editor.Text = SqlText;
+            FindText = new FindTextViewModel(SqlText ?? "");
 
-            // set up the highlighting for search results
             _generalHighlight = new SearchResultsHighlight("general");
-            _curentResultsHighlight = new SearchResultsHighlight("current")
+            _currentResultsHighlight = new SearchResultsHighlight("current")
             {
                 ForegroundBrush = Brushes.Black,
-                BackgroundBrush = Brushes.Orange,
+                BackgroundBrush = Brushes.Orange
             };
 
-            editor.TextArea.TextView.LineTransformers.Add(_generalHighlight);
-            editor.TextArea.TextView.LineTransformers.Add(_curentResultsHighlight);
-
-            editor.TextArea.TextView.Redraw();
+            if (editor != null)
+            {
+                editor.TextArea.TextView.LineTransformers.Add(_generalHighlight);
+                editor.TextArea.TextView.LineTransformers.Add(_currentResultsHighlight);
+                editor.TextArea.TextView.Redraw();
+            }
         }
 
         public void FindNext()
         {
             if (!FindText.HasResults()) return;
             FindText.NextResult();
-            _curentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
-            editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
-            editor.TextArea.TextView.Redraw();
+            _currentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
+            if (editor != null && FindText.ActiveResult != null)
+                editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
+            if (editor != null) editor.TextArea.TextView.Redraw();
         }
 
         public void FindPrevious()
         {
             if (!FindText.HasResults()) return;
             FindText.PreviousResult();
-            _curentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
-            editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
-            editor.TextArea.TextView.Redraw();
+            _currentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
+            if (editor != null && FindText.ActiveResult != null)
+                editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
+            if (editor != null) editor.TextArea.TextView.Redraw();
         }
 
         public override int GetHashCode()
         {
             return ToString().GetHashCode();
         }
-
-        //public void Handle(FontFamily message)
-        //{
-        //    editor.FontFamily = message;
-        //}
 
         public void Initialize(ScriptedObjectInfo info)
         {
@@ -189,44 +180,77 @@ namespace SqlTools.Scripting
 
         public void InitiateFindText()
         {
-            findTextBox.Focus();
-            findTextBox.SelectAll();
+            findTextBox?.Focus();
+            findTextBox?.SelectAll();
         }
 
         public void SetSqlFormat()
         {
-            if (editor == null || SqlText == null)
-            {
-                return;
-            }
-            string textToUse = null;
+            if (editor == null || SqlText == null) return;
+
+            string textToUse;
             if (FormatSql)
             {
-                textToUse = PoorMansTSqlFormatterLib.SqlFormattingManager.DefaultFormat(_originalSqlText);
+                try
+                {
+                    textToUse = CanonicalFormatSql(_originalSqlText);
+                }
+                catch (Exception ex)
+                {
+                    // fall back and log
+                    textToUse = _originalSqlText;
+                    Debug.WriteLine("SQL formatting error: " + ex.Message);
+                }
             }
             else
             {
                 textToUse = _originalSqlText;
             }
+
             SqlText = textToUse;
-            editor.Text = SqlText;
+            if (editor != null) editor.Text = SqlText;
+        }
+
+        private string CanonicalFormatSql(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return sql;
+
+            var parser = new TSql160Parser(false);
+            IList<ParseError> errors;
+            TSqlFragment fragment;
+            using (var reader = new StringReader(sql))
+            {
+                fragment = parser.Parse(reader, out errors);
+            }
+            if (errors != null && errors.Count > 0)
+                throw new Exception($"SQL Parsing Error: {errors[0].Message}");
+
+            var options = new SqlScriptGeneratorOptions
+            {
+                KeywordCasing = KeywordCasing.Uppercase,
+                IndentationSize = 4,
+                IncludeSemicolons = true
+            };
+
+            var generator = new Sql150ScriptGenerator(options);
+            generator.GenerateScript(fragment, out string formattedSql);
+            if (string.IsNullOrEmpty(formattedSql)) return sql;
+            return formattedSql.Replace("\r\n", Environment.NewLine);
         }
 
         public void TextSearch(string c)
         {
-            System.Diagnostics.Debug.WriteLine("Searching for: " + c);
+            Debug.WriteLine("Searching for: " + c);
 
             FindText.SearchText = c;
 
             _generalHighlight.FindResults = FindText.Results;
-            _curentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
+            _currentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
 
-            if (FindText.ActiveResult != null)
-            {
+            if (FindText.ActiveResult != null && editor != null)
                 editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
-            }
 
-            editor.TextArea.TextView.Redraw();
+            if (editor != null) editor.TextArea.TextView.Redraw();
         }
 
         public void ToggleSqlFormat()
@@ -244,15 +268,8 @@ namespace SqlTools.Scripting
 
         public override void TryClose(bool? dialogResult = null)
         {
-            //base.TryClose(dialogResult);
-            if (findTextChangedSubscription != null)
-            {
-                findTextChangedSubscription.Dispose();
-            }
-            if (sqlTextPropChangedSub != null)
-            {
-                sqlTextPropChangedSub.Dispose();
-            }
+            findTextChangedSubscription?.Dispose();
+            sqlTextPropChangedSub?.Dispose();
         }
 
         private FontFamily font = null;
@@ -260,20 +277,14 @@ namespace SqlTools.Scripting
         internal void SetFontFamily(FontFamily message)
         {
             font = message;
-            if (this.editor != null)
-            {
-                editor.FontFamily = message;
-            }
+            if (this.editor != null) editor.FontFamily = message;
         }
 
         protected override void OnViewLoaded(object viewObject)
         {
             base.OnViewLoaded(viewObject);
             var view = viewObject as ScriptedObjectDocumentView;
-            if (view == null)
-            {
-                return;
-            }
+            if (view == null) return;
             editor = view.editor;
             EditorLoaded();
             editor.FontFamily = font ?? new FontFamily("Consolas");
@@ -289,13 +300,14 @@ namespace SqlTools.Scripting
             Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
                 .Where(pc => pc.EventArgs.PropertyName == "FormatSql")
                 .SubscribeOnDispatcher()
-                .Subscribe(b => SetSqlFormat());
+                .Subscribe(_ => SetSqlFormat());
 
             sqlTextPropChangedSub = Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
                 .Where(pc => pc.EventArgs.PropertyName == "SqlText")
                 .SubscribeOnDispatcher()
-                .Subscribe(b => FindText = new FindTextViewModel(SqlText));
-            eventagg.Subscribe(this);
+                .Subscribe(_ => FindText = new FindTextViewModel(SqlText));
+
+            eventagg?.Subscribe(this);
         }
     }
 }

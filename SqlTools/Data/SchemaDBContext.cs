@@ -218,7 +218,8 @@ namespace SqlTools.Data
         {
             using (var cn = new SqlConnection(ConnectionViewModel.ConnectionString()))
             {
-                var srvConnect = new ServerConnection(cn);
+                // Use the connection string overload for ServerConnection to avoid type mismatch
+                var srvConnect = new ServerConnection(cn.ConnectionString);
                 var srv = new smo.Server(srvConnect);
                 srv.Refresh();
                 SetDefaultInitFields(srv);
