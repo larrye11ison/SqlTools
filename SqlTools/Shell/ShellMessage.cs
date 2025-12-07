@@ -12,8 +12,7 @@
     /// </summary>
     public class ShellMessage
     {
-        public Severity Severity { get; set; }
-
         public string MessageText { get; set; }
+        public Severity Severity { get; set; }
     }
 }

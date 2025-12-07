@@ -41,6 +41,7 @@ namespace SqlTools.Scripting
         // TODO: get rid of the disposables when closing the document
         private IDisposable findTextChangedSubscription;
 
+        private FontFamily font = null;
         private IDisposable sqlTextPropChangedSub;
 
         public ScriptedObjectDocumentViewModel()
@@ -216,6 +217,80 @@ namespace SqlTools.Scripting
 
             SqlText = textToUse;
             if (editor != null) editor.Text = SqlText;
+        }
+
+        public void TextSearch(string c)
+        {
+            Debug.WriteLine("Searching for: " + c);
+
+            FindText.SearchText = c;
+
+            _generalHighlight.FindResults = FindText.Results;
+            _currentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
+
+            if (FindText.ActiveResult != null && editor != null)
+                editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
+
+            if (editor != null) editor.TextArea.TextView.Redraw();
+        }
+
+        public void ToggleSqlFormat()
+        {
+            var searchy = FindText.SearchText;
+            TextSearch("");
+            FormatSql = !FormatSql;
+            TextSearch(searchy);
+        }
+
+        public override string ToString()
+        {
+            return CanonicalName;
+        }
+
+        internal void SetFontFamily(FontFamily message)
+        {
+            font = message;
+            if (this.editor != null) editor.FontFamily = message;
+        }
+
+        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
+        {
+            if (close)
+            {
+                findTextChangedSubscription?.Dispose();
+                sqlTextPropChangedSub?.Dispose();
+            }
+            return base.OnDeactivateAsync(close, cancellationToken);
+        }
+
+        protected override void OnViewLoaded(object viewObject)
+        {
+            base.OnViewLoaded(viewObject);
+            var view = viewObject as ScriptedObjectDocumentView;
+            if (view == null) return;
+            editor = view.editor;
+            EditorLoaded();
+            editor.FontFamily = font ?? new FontFamily("Consolas");
+            findTextBox = view.findTextBox;
+            findTextChangedSubscription = Observable
+                .FromEventPattern<TextChangedEventArgs>(findTextBox, "TextChanged")
+                .Select(c => ((TextBox)c.Sender).Text)
+                .DistinctUntilChanged()
+                .Throttle(TimeSpan.FromMilliseconds(200))
+                .ObserveOnDispatcher()
+                .Subscribe(c => TextSearch(c));
+
+            Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
+                .Where(pc => pc.EventArgs.PropertyName == "FormatSql")
+                .SubscribeOnDispatcher()
+                .Subscribe(_ => SetSqlFormat());
+
+            sqlTextPropChangedSub = Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
+                .Where(pc => pc.EventArgs.PropertyName == "SqlText")
+                .SubscribeOnDispatcher()
+                .Subscribe(_ => FindText = new FindTextViewModel(SqlText));
+
+            eventagg?.Subscribe(this);
         }
 
         private string CanonicalFormatSql(string sql)
@@ -444,82 +519,6 @@ namespace SqlTools.Scripting
                 default:
                     return false;
             }
-        }
-
-        public void TextSearch(string c)
-        {
-            Debug.WriteLine("Searching for: " + c);
-
-            FindText.SearchText = c;
-
-            _generalHighlight.FindResults = FindText.Results;
-            _currentResultsHighlight.FindResults = new FoundTextResult[] { FindText.ActiveResult };
-
-            if (FindText.ActiveResult != null && editor != null)
-                editor.ScrollToLine(editor.Document.GetLineByOffset(FindText.ActiveResult.StartOffset).LineNumber);
-
-            if (editor != null) editor.TextArea.TextView.Redraw();
-        }
-
-        public void ToggleSqlFormat()
-        {
-            var searchy = FindText.SearchText;
-            TextSearch("");
-            FormatSql = !FormatSql;
-            TextSearch(searchy);
-        }
-
-        public override string ToString()
-        {
-            return CanonicalName;
-        }
-
-        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
-        {
-            if (close)
-            {
-                findTextChangedSubscription?.Dispose();
-                sqlTextPropChangedSub?.Dispose();
-            }
-            return base.OnDeactivateAsync(close, cancellationToken);
-        }
-
-        private FontFamily font = null;
-
-        internal void SetFontFamily(FontFamily message)
-        {
-            font = message;
-            if (this.editor != null) editor.FontFamily = message;
-        }
-
-        protected override void OnViewLoaded(object viewObject)
-        {
-            base.OnViewLoaded(viewObject);
-            var view = viewObject as ScriptedObjectDocumentView;
-            if (view == null) return;
-            editor = view.editor;
-            EditorLoaded();
-            editor.FontFamily = font ?? new FontFamily("Consolas");
-            findTextBox = view.findTextBox;
-            findTextChangedSubscription = Observable
-                .FromEventPattern<TextChangedEventArgs>(findTextBox, "TextChanged")
-                .Select(c => ((TextBox)c.Sender).Text)
-                .DistinctUntilChanged()
-                .Throttle(TimeSpan.FromMilliseconds(200))
-                .ObserveOnDispatcher()
-                .Subscribe(c => TextSearch(c));
-
-            Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
-                .Where(pc => pc.EventArgs.PropertyName == "FormatSql")
-                .SubscribeOnDispatcher()
-                .Subscribe(_ => SetSqlFormat());
-
-            sqlTextPropChangedSub = Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
-                .Where(pc => pc.EventArgs.PropertyName == "SqlText")
-                .SubscribeOnDispatcher()
-                .Subscribe(_ => FindText = new FindTextViewModel(SqlText));
-
-            eventagg?.Subscribe(this);
         }
     }
 }

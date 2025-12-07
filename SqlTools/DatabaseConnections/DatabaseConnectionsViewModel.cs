@@ -25,20 +25,13 @@ namespace SqlTools.DatabaseConnections
     {
         private const string storageFileName = "connections.xml";
 
+        // AutoMapper instance
+        private readonly IMapper _mapper;
+
         [Import]
         private IEventAggregator eventAggregator = null;
 
         private FontFamily font = null;
-
-        // AutoMapper instance
-        private readonly IMapper _mapper;
-
-        public System.Windows.Input.ICommand CloseCommand
-        {
-            get { return null; }
-        }
-
-        public bool IsVisible { get; set; }
 
         public DatabaseConnectionsViewModel()
         {
@@ -51,6 +44,13 @@ namespace SqlTools.DatabaseConnections
 
             _mapper = config.CreateMapper();
         }
+
+        public System.Windows.Input.ICommand CloseCommand
+        {
+            get { return null; }
+        }
+
+        public bool IsVisible { get; set; }
 
         public void AddNewConnection()
         {

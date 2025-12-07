@@ -31,9 +31,24 @@ namespace SqlTools.UI
     public class ExpanderGridControllerBehavior : Behavior<Expander>
     {
         private Grid grid;
-        private Action<GridLength> sizeSetter = null;
-        private Func<GridLength> sizeGetter = null;
         private GridLength previousGridLength = GridLength.Auto;
+        private Func<GridLength> sizeGetter = null;
+        private Action<GridLength> sizeSetter = null;
+
+        public Grid FindGrid(FrameworkElement thingWithParent)
+        {
+            var parentFrameworkElement = thingWithParent.Parent as FrameworkElement;
+            if (parentFrameworkElement != null)
+            {
+                var grid = parentFrameworkElement as Grid;
+                if (grid != null)
+                {
+                    return grid;
+                }
+                return FindGrid(parentFrameworkElement);
+            }
+            return null;
+        }
 
         protected override void OnAttached()
         {
@@ -81,21 +96,6 @@ namespace SqlTools.UI
             {
                 throw new InvalidOperationException("Unable to locate parent grid object.");
             }
-        }
-
-        public Grid FindGrid(FrameworkElement thingWithParent)
-        {
-            var parentFrameworkElement = thingWithParent.Parent as FrameworkElement;
-            if (parentFrameworkElement != null)
-            {
-                var grid = parentFrameworkElement as Grid;
-                if (grid != null)
-                {
-                    return grid;
-                }
-                return FindGrid(parentFrameworkElement);
-            }
-            return null;
         }
     }
 }

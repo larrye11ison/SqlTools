@@ -15,13 +15,13 @@ namespace SqlTools.UI
             , typeof(InputBindingTrigger)
             , new UIPropertyMetadata(null));
 
+        public event EventHandler CanExecuteChanged = delegate { };
+
         public InputBinding InputBinding
         {
             get { return (InputBinding)GetValue(InputBindingProperty); }
             set { SetValue(InputBindingProperty, value); }
         }
-
-        public event EventHandler CanExecuteChanged = delegate { };
 
         public bool CanExecute(object parameter)
         {
