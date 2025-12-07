@@ -16,7 +16,7 @@ This is the interface for locating objects by searching on the SQL Server:
 
 ![Code View Interface](/Wiki/Images/SqlToolsSearchInterface.png)
 
-Clicking the "Script" button gets the SQL object definition for that object and then displays it to you in this interface:
+Clicking the "Script" button obtains the SQL object definition for that object and then displays it to you in this interface:
 
 ![Code View Interface](/Wiki/Images/SqlToolsCodeViewInterface.png)
 
@@ -59,13 +59,22 @@ Sure, I've got nothing better to do...
   * After you search, you can use somewhat sophisticated filtering techniques to narrow down those results on the client-side
 * When viewing object definition scripts
   * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
-  * Has option to format the object's code using [Poor Man's T-SQL Formatter](http://architectshack.com/PoorMansTSqlFormatter.ashx)
+  * Has option to canonicalize and reformat the object code using `Microsoft.SqlServer.TransactSql.ScriptDom`.
   * Incremental find within object definition scripts.
 
 ## Requirements
 
-* .net 4.5 or higher 
-  * ...although you could probably convert the project to 4.0 easily if you wanted to
-* An MS SQL 2008 or higher database
-  * Most of the testing and dev has been against SQL 2008 with some limited usage against 2012 and 2014. So *it should be fine.* 
-  * All editions of "SQL Server" should work - LocalDB, SQLExpress and various flavors of "full" SQL Server are all fine. The only requirement here is that you need to know how to construct the connection info.
+* .net 4.8 or higher 
+* Windows 11, but probably Win 10.
+  * I doubt it would run on Linux - never needed to try.
+* An MS SQL 2008 or higher database... _probably_. 
+  * This tool was developed years ago and was initially used extensively on SQL 2008. 
+  * Over the years, my work environment 
+    upgraded to 2014, then 2019, and the tool has always worked fine the whole time.
+  * But I haven't tried to hit anything older than 2014 for almost 5 years, and it's been at 
+    least a full year since I've tried anything older than 2019. I also haven't yet tried hitting
+    anything newer than 2019.
+  * As of Dec 2025, the current codebase has been upgraded - all the latest nuget packages for 
+    data access and "ScriptDom" have been updated. So there's now even a bit chance that older 
+    MSSQL platforms may have issues, so beware.
+    
