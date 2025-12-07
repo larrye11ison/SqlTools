@@ -1,12 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.IO.IsolatedStorage;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Xml.Serialization;
 
 namespace SqlTools.Settings
 {
@@ -16,39 +19,22 @@ namespace SqlTools.Settings
     public partial class FontChooser : Window
     {
         public static readonly DependencyProperty AnnotationAlternatesProperty = RegisterTypographicProperty(Typography.AnnotationAlternatesProperty);
-
         public static readonly DependencyProperty CapitalSpacingProperty = RegisterTypographicProperty(Typography.CapitalSpacingProperty);
-
         public static readonly DependencyProperty CapitalsProperty = RegisterTypographicProperty(Typography.CapitalsProperty);
-
         public static readonly DependencyProperty CaseSensitiveFormsProperty = RegisterTypographicProperty(Typography.CaseSensitiveFormsProperty);
-
         public static readonly DependencyProperty ContextualAlternatesProperty = RegisterTypographicProperty(Typography.ContextualAlternatesProperty);
-
         public static readonly DependencyProperty ContextualLigaturesProperty = RegisterTypographicProperty(Typography.ContextualLigaturesProperty);
-
         public static readonly DependencyProperty ContextualSwashesProperty = RegisterTypographicProperty(Typography.ContextualSwashesProperty);
-
         public static readonly DependencyProperty DiscretionaryLigaturesProperty = RegisterTypographicProperty(Typography.DiscretionaryLigaturesProperty);
-
         public static readonly DependencyProperty EastAsianExpertFormsProperty = RegisterTypographicProperty(Typography.EastAsianExpertFormsProperty);
-
         public static readonly DependencyProperty EastAsianLanguageProperty = RegisterTypographicProperty(Typography.EastAsianLanguageProperty);
-
         public static readonly DependencyProperty EastAsianWidthsProperty = RegisterTypographicProperty(Typography.EastAsianWidthsProperty);
-
         public static readonly DependencyProperty FractionProperty = RegisterTypographicProperty(Typography.FractionProperty, "OneHalf");
-
         public static readonly DependencyProperty HistoricalFormsProperty = RegisterTypographicProperty(Typography.HistoricalFormsProperty);
-
         public static readonly DependencyProperty HistoricalLigaturesProperty = RegisterTypographicProperty(Typography.HistoricalLigaturesProperty);
-
         public static readonly DependencyProperty KerningProperty = RegisterTypographicProperty(Typography.KerningProperty);
-
         public static readonly DependencyProperty MathematicalGreekProperty = RegisterTypographicProperty(Typography.MathematicalGreekProperty);
-
         public static readonly DependencyProperty NumeralAlignmentProperty = RegisterTypographicProperty(Typography.NumeralAlignmentProperty, "Digits");
-
         public static readonly DependencyProperty NumeralStyleProperty = RegisterTypographicProperty(Typography.NumeralStyleProperty, "Digits");
 
         public static readonly DependencyProperty SelectedFontFamilyProperty = RegisterFontProperty(
@@ -88,54 +74,31 @@ namespace SqlTools.Settings
            );
 
         public static readonly DependencyProperty SlashedZeroProperty = RegisterTypographicProperty(Typography.SlashedZeroProperty, "Digits");
-
         public static readonly DependencyProperty StandardLigaturesProperty = RegisterTypographicProperty(Typography.StandardLigaturesProperty);
-
         public static readonly DependencyProperty StandardSwashesProperty = RegisterTypographicProperty(Typography.StandardSwashesProperty);
-
         public static readonly DependencyProperty StylisticAlternatesProperty = RegisterTypographicProperty(Typography.StylisticAlternatesProperty);
-
         public static readonly DependencyProperty StylisticSet10Property = RegisterTypographicProperty(Typography.StylisticSet10Property);
-
         public static readonly DependencyProperty StylisticSet11Property = RegisterTypographicProperty(Typography.StylisticSet11Property);
-
         public static readonly DependencyProperty StylisticSet12Property = RegisterTypographicProperty(Typography.StylisticSet12Property);
-
         public static readonly DependencyProperty StylisticSet13Property = RegisterTypographicProperty(Typography.StylisticSet13Property);
-
         public static readonly DependencyProperty StylisticSet14Property = RegisterTypographicProperty(Typography.StylisticSet14Property);
-
         public static readonly DependencyProperty StylisticSet15Property = RegisterTypographicProperty(Typography.StylisticSet15Property);
-
         public static readonly DependencyProperty StylisticSet16Property = RegisterTypographicProperty(Typography.StylisticSet16Property);
-
         public static readonly DependencyProperty StylisticSet17Property = RegisterTypographicProperty(Typography.StylisticSet17Property);
-
         public static readonly DependencyProperty StylisticSet18Property = RegisterTypographicProperty(Typography.StylisticSet18Property);
-
         public static readonly DependencyProperty StylisticSet19Property = RegisterTypographicProperty(Typography.StylisticSet19Property);
-
         public static readonly DependencyProperty StylisticSet1Property = RegisterTypographicProperty(Typography.StylisticSet1Property);
-
         public static readonly DependencyProperty StylisticSet20Property = RegisterTypographicProperty(Typography.StylisticSet20Property);
-
         public static readonly DependencyProperty StylisticSet2Property = RegisterTypographicProperty(Typography.StylisticSet2Property);
-
         public static readonly DependencyProperty StylisticSet3Property = RegisterTypographicProperty(Typography.StylisticSet3Property);
-
         public static readonly DependencyProperty StylisticSet4Property = RegisterTypographicProperty(Typography.StylisticSet4Property);
-
         public static readonly DependencyProperty StylisticSet5Property = RegisterTypographicProperty(Typography.StylisticSet5Property);
-
         public static readonly DependencyProperty StylisticSet6Property = RegisterTypographicProperty(Typography.StylisticSet6Property);
-
         public static readonly DependencyProperty StylisticSet7Property = RegisterTypographicProperty(Typography.StylisticSet7Property);
-
         public static readonly DependencyProperty StylisticSet8Property = RegisterTypographicProperty(Typography.StylisticSet8Property);
-
         public static readonly DependencyProperty StylisticSet9Property = RegisterTypographicProperty(Typography.StylisticSet9Property);
-
         public static readonly DependencyProperty VariantsProperty = RegisterTypographicProperty(Typography.VariantsProperty);
+        private const string StorageFileName = "connections.xml";
 
         // Array of all font chooser dependency properties
         private static readonly DependencyProperty[] _chooserProperties = new DependencyProperty[]
@@ -230,6 +193,18 @@ namespace SqlTools.Settings
         public FontChooser()
         {
             InitializeComponent();
+        }
+
+        /// <summary>
+        /// Constructor that initializes the dialog with the current application font setting.
+        /// </summary>
+        /// <param name="loadCurrentFont">If true, loads the current font from application settings.</param>
+        public FontChooser(bool loadCurrentFont) : this()
+        {
+            if (loadCurrentFont)
+            {
+                LoadCurrentFontFromSettings();
+            }
         }
 
         private delegate void UpdateCallback();
@@ -1270,6 +1245,42 @@ namespace SqlTools.Settings
             }
         }
 
+        /// <summary>
+        /// Loads the current font from application settings and sets it as the selected font.
+        /// If loading fails or no font is saved, falls back to a suitable monospaced font.
+        /// </summary>
+        private void LoadCurrentFontFromSettings()
+        {
+            try
+            {
+                var storageScope = IsolatedStorageScope.Assembly | IsolatedStorageScope.User;
+                using (var store = IsolatedStorageFile.GetStore(storageScope, null, null))
+                {
+                    if (store.FileExists(StorageFileName))
+                    {
+                        using (var file = store.OpenFile(StorageFileName, FileMode.Open, FileAccess.Read))
+                        {
+                            var ser = new XmlSerializer(typeof(ApplicationSettings));
+                            var appSettings = (ApplicationSettings)ser.Deserialize(file);
+
+                            if (!string.IsNullOrWhiteSpace(appSettings.FontFamilyName))
+                            {
+                                SelectedFontFamily = new FontFamily(appSettings.FontFamilyName);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // If we can't load settings, fall through to default
+            }
+
+            // No saved font or loading failed - use fallback
+            SetFallbackMonospacedFont();
+        }
+
         private void MoveListPosition(ListBox listBox, int distance)
         {
             int i = listBox.Items.CurrentPosition + distance;
@@ -1586,6 +1597,29 @@ namespace SqlTools.Settings
             }
         }
 
+        // indicates the list of typefaces is valid
+        // indicates the current selection in the typeface list is valid
+        // state and logic for each tab
+        /// <summary>
+        /// Sets the selected font to the first available monospaced font from a preferred list.
+        /// </summary>
+        private void SetFallbackMonospacedFont()
+        {
+            var monospacedFonts = new[] { "Cascadia Code", "Consolas", "Lucida Console", "Monaco", "Menlo" };
+            foreach (var fontName in monospacedFonts)
+            {
+                var fontFamily = new FontFamily(fontName);
+                if (Fonts.SystemFontFamilies.Contains(fontFamily))
+                {
+                    SelectedFontFamily = fontFamily;
+                    return;
+                }
+            }
+
+            // Ultimate fallback if none of the preferred fonts are found
+            SelectedFontFamily = new FontFamily("Consolas");
+        }
+
         private void sizeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             FontSizeListItem item = sizeList.SelectedItem as FontSizeListItem;
@@ -1659,9 +1693,6 @@ namespace SqlTools.Settings
             }
         }
 
-        // indicates the list of typefaces is valid
-        // indicates the current selection in the typeface list is valid
-        // state and logic for each tab
         // Specialized metadata object for font chooser dependency properties
         private class FontPropertyMetadata : FrameworkPropertyMetadata
         {

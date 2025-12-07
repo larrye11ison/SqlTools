@@ -77,11 +77,12 @@ namespace SqlTools.Shell
 
         public void ChangeSQLFont()
         {
-            var turd = new Settings.FontChooser();
-            var res = turd.ShowDialog();
-            if (turd.DialogResult.HasValue && turd.DialogResult.Value)
+            // FontChooser now handles loading the current font itself
+            var fontChooser = new Settings.FontChooser(loadCurrentFont: true);
+
+            if (fontChooser.ShowDialog() == true)
             {
-                _ = EventAggregator.PublishOnUIThreadAsync(turd.SelectedFontFamily);
+                _ = EventAggregator.PublishOnUIThreadAsync(fontChooser.SelectedFontFamily);
             }
         }
 
