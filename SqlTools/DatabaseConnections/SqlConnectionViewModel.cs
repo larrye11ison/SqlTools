@@ -100,16 +100,8 @@ namespace SqlTools.DatabaseConnections
 
         public string ServerAndInstance { get; set; }
 
-        //public bool SearchAcrossAllDatabasesNegated
-        //{
-        //    get
-        //    {
-        //        return !SearchAcrossAllDatabases;
-        //    }
-        //}
         public ConnectionStatus Status { get; set; }
 
-        //public bool SearchAcrossAllDatabases { get; set; }
         public string UserName { get; set; }
 
         public void CheckAllDatabases()

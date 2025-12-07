@@ -15,6 +15,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace SqlTools.Scripting
 {
@@ -215,29 +216,229 @@ namespace SqlTools.Scripting
         {
             if (string.IsNullOrWhiteSpace(sql)) return sql;
 
-            var parser = new TSql160Parser(false);
-            IList<ParseError> errors;
-            TSqlFragment fragment;
-            using (var reader = new StringReader(sql))
+            try
             {
-                fragment = parser.Parse(reader, out errors);
+                var parser = new TSql160Parser(false);
+                IList<ParseError> errors;
+                TSqlFragment fragment;
+                
+                using (var reader = new StringReader(sql))
+                {
+                    fragment = parser.Parse(reader, out errors);
+                }
+                
+                if (errors != null && errors.Count > 0)
+                    throw new Exception($"SQL Parsing Error: {errors[0].Message}");
+                
+                var tokens = fragment.ScriptTokenStream;
+                if (tokens == null || tokens.Count == 0)
+                    return sql;
+                
+                // Walk the token stream and apply formatting + OR ALTER injection
+                var result = new StringBuilder();
+                int indentLevel = 0;
+                bool lineStart = true;
+                
+                for (int i = 0; i < tokens.Count; i++)
+                {
+                    var token = tokens[i];
+                    
+                    // Check if this is a CREATE keyword followed by PROCEDURE/FUNCTION/VIEW/TRIGGER
+                    if (token.TokenType == TSqlTokenType.Create)
+                    {
+                        // Find next significant token (skip whitespace/comments) to CHECK what type
+                        int nextSignificantIndex = i + 1;
+                        while (nextSignificantIndex < tokens.Count && 
+                               (tokens[nextSignificantIndex].TokenType == TSqlTokenType.WhiteSpace ||
+                                tokens[nextSignificantIndex].TokenType == TSqlTokenType.MultilineComment ||
+                                tokens[nextSignificantIndex].TokenType == TSqlTokenType.SingleLineComment))
+                        {
+                            nextSignificantIndex++;
+                        }
+                        
+                        if (nextSignificantIndex < tokens.Count)
+                        {
+                            var significantToken = tokens[nextSignificantIndex];
+                            if (significantToken.TokenType == TSqlTokenType.Procedure ||
+                                significantToken.TokenType == TSqlTokenType.Function ||
+                                significantToken.TokenType == TSqlTokenType.View ||
+                                significantToken.TokenType == TSqlTokenType.Trigger)
+                            {
+                                // Output CREATE OR ALTER (replacing CREATE)
+                                if (lineStart)
+                                {
+                                    result.Append(new string(' ', indentLevel * 4));
+                                    lineStart = false;
+                                }
+                                result.Append("CREATE OR ALTER");
+                                
+                                // Now output all the tokens between CREATE and the object type
+                                // (this includes any comments or whitespace that appeared there)
+                                for (int j = i + 1; j < nextSignificantIndex; j++)
+                                {
+                                    var interveningToken = tokens[j];
+                                    if (interveningToken.TokenType == TSqlTokenType.WhiteSpace)
+                                    {
+                                        if (interveningToken.Text.Contains("\n") || interveningToken.Text.Contains("\r"))
+                                        {
+                                            result.Append(Environment.NewLine);
+                                            lineStart = true;
+                                        }
+                                        else if (!lineStart)
+                                        {
+                                            result.Append(" ");
+                                        }
+                                    }
+                                    else // Comment
+                                    {
+                                        if (lineStart)
+                                        {
+                                            result.Append(new string(' ', indentLevel * 4));
+                                            lineStart = false;
+                                        }
+                                        result.Append(interveningToken.Text);
+                                    }
+                                }
+                                
+                                // Skip to just before the object type keyword (we'll process it normally next iteration)
+                                i = nextSignificantIndex - 1;
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // Apply formatting rules based on token type
+                    switch (token.TokenType)
+                    {
+                        case TSqlTokenType.WhiteSpace:
+                            // Normalize whitespace - preserve line breaks, standardize spaces
+                            if (token.Text.Contains("\n") || token.Text.Contains("\r"))
+                            {
+                                result.Append(Environment.NewLine);
+                                lineStart = true;
+                            }
+                            else if (!lineStart)
+                            {
+                                result.Append(" ");
+                            }
+                            break;
+                            
+                        case TSqlTokenType.SingleLineComment:
+                        case TSqlTokenType.MultilineComment:
+                            // Preserve comments as-is
+                            if (lineStart)
+                            {
+                                result.Append(new string(' ', indentLevel * 4));
+                                lineStart = false;
+                            }
+                            result.Append(token.Text);
+                            break;
+                            
+                        default:
+                            // Apply indentation if at start of line
+                            if (lineStart)
+                            {
+                                result.Append(new string(' ', indentLevel * 4));
+                                lineStart = false;
+                            }
+                            
+                            // Apply keyword casing
+                            if (IsKeyword(token.TokenType))
+                            {
+                                result.Append(token.Text.ToUpperInvariant());
+                            }
+                            else
+                            {
+                                result.Append(token.Text);
+                            }
+                            
+                            // Track indentation for BEGIN/END blocks
+                            if (token.TokenType == TSqlTokenType.Begin)
+                            {
+                                indentLevel++;
+                            }
+                            else if (token.TokenType == TSqlTokenType.End)
+                            {
+                                indentLevel = Math.Max(0, indentLevel - 1);
+                            }
+                            break;
+                    }
+                }
+                
+                return result.ToString();
             }
-            if (errors != null && errors.Count > 0)
-                throw new Exception($"SQL Parsing Error: {errors[0].Message}");
-
-            var options = new SqlScriptGeneratorOptions
+            catch (Exception ex)
             {
-                KeywordCasing = KeywordCasing.Uppercase,
-                IndentationSize = 4,
-                IncludeSemicolons = true
-            };
-
-            var generator = new Sql150ScriptGenerator(options);
-            generator.GenerateScript(fragment, out string formattedSql);
-            if (string.IsNullOrEmpty(formattedSql)) return sql;
-            return formattedSql.Replace("\r\n", Environment.NewLine);
+                Debug.WriteLine($"Formatting error: {ex.Message}");
+                return sql;
+            }
         }
-
+        
+        private bool IsKeyword(TSqlTokenType tokenType)
+        {
+            // Return true for SQL keywords that should be uppercased
+            switch (tokenType)
+            {
+                case TSqlTokenType.Select:
+                case TSqlTokenType.From:
+                case TSqlTokenType.Where:
+                case TSqlTokenType.Insert:
+                case TSqlTokenType.Update:
+                case TSqlTokenType.Delete:
+                case TSqlTokenType.Create:
+                case TSqlTokenType.Alter:
+                case TSqlTokenType.Drop:
+                case TSqlTokenType.Procedure:
+                case TSqlTokenType.Function:
+                case TSqlTokenType.View:
+                case TSqlTokenType.Trigger:
+                case TSqlTokenType.Begin:
+                case TSqlTokenType.End:
+                case TSqlTokenType.If:
+                case TSqlTokenType.Else:
+                case TSqlTokenType.While:
+                case TSqlTokenType.Return:
+                case TSqlTokenType.Declare:
+                case TSqlTokenType.Set:
+                case TSqlTokenType.As:
+                case TSqlTokenType.Join:
+                case TSqlTokenType.Left:
+                case TSqlTokenType.Right:
+                case TSqlTokenType.Inner:
+                case TSqlTokenType.Outer:
+                case TSqlTokenType.On:
+                case TSqlTokenType.And:
+                case TSqlTokenType.Or:
+                case TSqlTokenType.Not:
+                case TSqlTokenType.Null:
+                case TSqlTokenType.Is:
+                case TSqlTokenType.In:
+                case TSqlTokenType.Between:
+                case TSqlTokenType.Like:
+                case TSqlTokenType.Exists:
+                case TSqlTokenType.Case:
+                case TSqlTokenType.When:
+                case TSqlTokenType.Then:
+                case TSqlTokenType.Order:
+                case TSqlTokenType.By:
+                case TSqlTokenType.Group:
+                case TSqlTokenType.Having:
+                case TSqlTokenType.Distinct:
+                case TSqlTokenType.Top:
+                case TSqlTokenType.With:
+                case TSqlTokenType.Union:
+                case TSqlTokenType.All:
+                case TSqlTokenType.Into:
+                case TSqlTokenType.Values:
+                case TSqlTokenType.Table:
+                case TSqlTokenType.Execute:
+                case TSqlTokenType.Exec:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        
         public void TextSearch(string c)
         {
             Debug.WriteLine("Searching for: " + c);

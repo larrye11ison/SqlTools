@@ -10,6 +10,8 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Xml.Serialization;
+using AutoMapper;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SqlTools.DatabaseConnections
 {
@@ -26,12 +28,27 @@ namespace SqlTools.DatabaseConnections
 
         private FontFamily font = null;
 
+        // AutoMapper instance
+        private readonly IMapper _mapper;
+
         public System.Windows.Input.ICommand CloseCommand
         {
             get { return null; }
         }
 
         public bool IsVisible { get; set; }
+
+        public DatabaseConnectionsViewModel()
+        {
+            // configure AutoMapper with NullLoggerFactory to avoid NullReferenceException
+            var config = new MapperConfiguration(cfg =>
+            {
+                cfg.CreateMap<SqlConnectionViewModel, SqlConnectionDto>();
+                cfg.CreateMap<SqlConnectionDto, SqlConnectionViewModel>();
+            }, NullLoggerFactory.Instance);
+
+            _mapper = config.CreateMapper();
+        }
 
         public void AddNewConnection()
         {
@@ -65,7 +82,8 @@ namespace SqlTools.DatabaseConnections
                         var settings = new Settings.ApplicationSettings();
                         var ff = this.font ?? new FontFamily("Consolas");
                         settings.FontFamilyName = ff.Source;
-                        settings.Connections = Items.Select(i => AutoMapper.Mapper.Map(i, new SqlConnectionDto())).ToArray();
+                        // use AutoMapper instance to map to DTOs
+                        settings.Connections = Items.Select(i => _mapper.Map<SqlConnectionDto>(i)).ToArray();
                         ser.Serialize(file, settings);
                     }
                 }
@@ -105,13 +123,6 @@ namespace SqlTools.DatabaseConnections
             base.OnInitialize();
             eventAggregator.Subscribe(this);
 
-            AutoMapper.Mapper.Initialize(cfg =>
-            {
-                cfg.CreateMap<SqlConnectionViewModel, SqlConnectionDto>();
-                cfg.CreateMap<SqlConnectionDto, SqlConnectionViewModel>();
-                cfg.CreateMissingTypeMaps = true;
-            });
-
             foreach (var item in ConnectionsLoadFromStorage())
             {
                 Items.Add(item);
@@ -148,7 +159,8 @@ namespace SqlTools.DatabaseConnections
                 foreach (var item in appSettings.Connections)
                 {
                     SqlConnectionViewModel vm = IoC.Get<SqlConnectionViewModel>();
-                    AutoMapper.Mapper.Map(item, vm);
+                    // use AutoMapper to map DTO into existing viewmodel instance
+                    _mapper.Map(item, vm);
                     vmcoll.Add(vm);
                 }
 

@@ -116,7 +116,8 @@ namespace SqlTools.Data
                 DriAllKeys = true,
                 DriAllConstraints = true,
                 SchemaQualify = true,
-                Indexes = true
+                Indexes = true,
+                ScriptForCreateOrAlter = true
             };
 
         /// <summary>
@@ -216,11 +217,26 @@ namespace SqlTools.Data
 
         public async Task<string> GetObjectDefinition(SysObject so)
         {
-            using (var cn = new SqlConnection(ConnectionViewModel.ConnectionString()))
+            var connectionString = ConnectionViewModel.ConnectionString();
+            var csBuilder = new SqlConnectionStringBuilder(connectionString);
+            
+            // Create SqlConnectionInfo from the connection string to preserve all properties including protocol
+            var connInfo = new SqlConnectionInfo();
+            connInfo.ServerName = csBuilder.DataSource;
+            connInfo.DatabaseName = csBuilder.InitialCatalog;
+            connInfo.UseIntegratedSecurity = csBuilder.IntegratedSecurity;
+            if (!csBuilder.IntegratedSecurity)
             {
-                // Use the connection string overload for ServerConnection to avoid type mismatch
-                var srvConnect = new ServerConnection(cn.ConnectionString);
-                var srv = new smo.Server(srvConnect);
+                connInfo.UserName = csBuilder.UserID;
+                connInfo.Password = csBuilder.Password;
+            }
+            connInfo.ConnectionTimeout = csBuilder.ConnectTimeout;
+            
+            var srvConnect = new ServerConnection(connInfo);
+            var srv = new smo.Server(srvConnect);
+            
+            try
+            {
                 srv.Refresh();
                 SetDefaultInitFields(srv);
                 smo.Database database = null;
@@ -300,6 +316,13 @@ namespace SqlTools.Data
                 });
 
                 return sb.ToString();
+            }
+            finally
+            {
+                if (srvConnect != null && srvConnect.IsOpen)
+                {
+                    srvConnect.Disconnect();
+                }
             }
         }
 
