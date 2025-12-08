@@ -11,7 +11,7 @@ using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using smo = Microsoft.SqlServer.Management.Smo;
+using SMO = Microsoft.SqlServer.Management.Smo;
 
 namespace SqlTools.Data
 {
@@ -109,8 +109,8 @@ namespace SqlTools.Data
         /// <summary>
         /// The options used for the CREATE script.
         /// </summary>
-        private static readonly smo.ScriptingOptions scriptCreateOptions
-            = new smo.ScriptingOptions()
+        private static readonly SMO.ScriptingOptions scriptCreateOptions
+            = new SMO.ScriptingOptions()
             {
                 DriAll = true,
                 DriAllKeys = true,
@@ -123,8 +123,8 @@ namespace SqlTools.Data
         /// <summary>
         /// The options used for the DROP script.
         /// </summary>
-        private static readonly smo.ScriptingOptions scriptDropOptions
-            = new smo.ScriptingOptions()
+        private static readonly SMO.ScriptingOptions scriptDropOptions
+            = new SMO.ScriptingOptions()
             {
                 IncludeIfNotExists = true,
                 ScriptDrops = true
@@ -233,13 +233,13 @@ namespace SqlTools.Data
             connInfo.ConnectionTimeout = csBuilder.ConnectTimeout;
 
             var srvConnect = new ServerConnection(connInfo);
-            var srv = new smo.Server(srvConnect);
+            var srv = new SMO.Server(srvConnect);
 
             try
             {
                 srv.Refresh();
                 SetDefaultInitFields(srv);
-                smo.Database database = null;
+                SMO.Database database = null;
                 StringBuilder sb = null;
                 await Task.Factory.StartNew(() =>
                 {
@@ -341,17 +341,17 @@ namespace SqlTools.Data
             }
         }
 
-        private static void SetDefaultInitFields(smo.Server srv)
+        private static void SetDefaultInitFields(SMO.Server srv)
         {
             var defaultProps = new string[] { "Name", "Owner", "DateLastModified", "CreateDate", "Schema" };
             var defaultCheckProps = new string[] { "Name", "DateLastModified", "CreateDate" };
-            srv.SetDefaultInitFields(typeof(smo.Database), "Name", "Owner", "CreateDate");
-            srv.SetDefaultInitFields(typeof(smo.Check), defaultCheckProps);
-            srv.SetDefaultInitFields(typeof(smo.UserDefinedFunction), defaultProps);
-            srv.SetDefaultInitFields(typeof(smo.StoredProcedure), defaultProps);
-            srv.SetDefaultInitFields(typeof(smo.Trigger), defaultCheckProps);
-            srv.SetDefaultInitFields(typeof(smo.View), defaultProps);
-            srv.SetDefaultInitFields(typeof(smo.Table), defaultProps);
+            srv.SetDefaultInitFields(typeof(SMO.Database), "Name", "Owner", "CreateDate");
+            srv.SetDefaultInitFields(typeof(SMO.Check), defaultCheckProps);
+            srv.SetDefaultInitFields(typeof(SMO.UserDefinedFunction), defaultProps);
+            srv.SetDefaultInitFields(typeof(SMO.StoredProcedure), defaultProps);
+            srv.SetDefaultInitFields(typeof(SMO.Trigger), defaultCheckProps);
+            srv.SetDefaultInitFields(typeof(SMO.View), defaultProps);
+            srv.SetDefaultInitFields(typeof(SMO.Table), defaultProps);
         }
 
         private string QuoteName(string s)

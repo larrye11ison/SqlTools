@@ -11,12 +11,14 @@ using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using System.Xml;
 
 namespace SqlTools.Scripting
@@ -277,18 +279,18 @@ namespace SqlTools.Scripting
                 .Select(c => ((TextBox)c.Sender).Text)
                 .DistinctUntilChanged()
                 .Throttle(TimeSpan.FromMilliseconds(200))
-                .ObserveOnDispatcher()
-                .Subscribe(c => TextSearch(c));
+                .ObserveOn(System.Reactive.Concurrency.Scheduler.CurrentThread)
+                .Subscribe(c => Dispatcher.CurrentDispatcher.BeginInvoke(new System.Action(() => TextSearch(c))));
 
             Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
                 .Where(pc => pc.EventArgs.PropertyName == "FormatSql")
-                .SubscribeOnDispatcher()
-                .Subscribe(_ => SetSqlFormat());
+                .ObserveOn(System.Reactive.Concurrency.Scheduler.CurrentThread)
+                .Subscribe(_ => Dispatcher.CurrentDispatcher.BeginInvoke(new System.Action(SetSqlFormat)));
 
             sqlTextPropChangedSub = Observable.FromEventPattern<PropertyChangedEventArgs>(this, "PropertyChanged")
                 .Where(pc => pc.EventArgs.PropertyName == "SqlText")
-                .SubscribeOnDispatcher()
-                .Subscribe(_ => FindText = new FindTextViewModel(SqlText));
+                .ObserveOn(System.Reactive.Concurrency.Scheduler.CurrentThread)
+                .Subscribe(_ => Dispatcher.CurrentDispatcher.BeginInvoke(new System.Action(() => FindText = new FindTextViewModel(SqlText))));
 
             eventagg?.SubscribeOnPublishedThread(this);
         }

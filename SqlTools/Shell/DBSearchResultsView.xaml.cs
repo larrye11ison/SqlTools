@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace SqlTools.Shell
 {
@@ -15,7 +17,7 @@ namespace SqlTools.Shell
 
             Observable.FromEventPattern<TextChangedEventArgs>(ResultsFilter, "TextChanged")
                 .Throttle(TimeSpan.FromMilliseconds(300))
-                .ObserveOnDispatcher()
+                .ObserveOn(System.Reactive.Concurrency.Scheduler.CurrentThread)
                 .Select(tb => ResultsFilter.Text)
                 .DistinctUntilChanged()
                 .Subscribe(b =>

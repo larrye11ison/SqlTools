@@ -13,8 +13,6 @@ namespace SqlTools.DatabaseConnections
 
         public string ObjectSchemaQuery { get; set; }
 
-        public bool SearchAcrossAllDatabases { get; set; }
-
         public string ServerAndInstance { get; set; }
 
         public string UserName { get; set; }

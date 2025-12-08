@@ -1,6 +1,4 @@
-﻿using AutoMapper;
-using Caliburn.Micro;
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Caliburn.Micro;
 using SqlTools.Shell;
 using System;
 using System.Collections.Generic;
@@ -25,9 +23,6 @@ namespace SqlTools.DatabaseConnections
     {
         private const string storageFileName = "connections.xml";
 
-        // AutoMapper instance
-        private readonly IMapper _mapper;
-
         [Import]
         private IEventAggregator eventAggregator = null;
 
@@ -35,14 +30,6 @@ namespace SqlTools.DatabaseConnections
 
         public DatabaseConnectionsViewModel()
         {
-            // configure AutoMapper with NullLoggerFactory to avoid NullReferenceException
-            var config = new MapperConfiguration(cfg =>
-            {
-                cfg.CreateMap<SqlConnectionViewModel, SqlConnectionDto>();
-                cfg.CreateMap<SqlConnectionDto, SqlConnectionViewModel>();
-            }, NullLoggerFactory.Instance);
-
-            _mapper = config.CreateMapper();
         }
 
         public System.Windows.Input.ICommand CloseCommand
@@ -84,8 +71,8 @@ namespace SqlTools.DatabaseConnections
                         var settings = new Settings.ApplicationSettings();
                         var ff = this.font ?? new FontFamily("Consolas");
                         settings.FontFamilyName = ff.Source;
-                        // use AutoMapper instance to map to DTOs
-                        settings.Connections = Items.Select(i => _mapper.Map<SqlConnectionDto>(i)).ToArray();
+                        // Use manual mapping to convert to DTOs
+                        settings.Connections = Items.Select(ToDto).ToArray();
                         ser.Serialize(file, settings);
                     }
                 }
@@ -164,8 +151,8 @@ namespace SqlTools.DatabaseConnections
                 foreach (var item in appSettings.Connections)
                 {
                     SqlConnectionViewModel vm = IoC.Get<SqlConnectionViewModel>();
-                    // use AutoMapper to map DTO into existing viewmodel instance
-                    _mapper.Map(item, vm);
+                    // Use manual mapping to populate viewmodel from DTO
+                    MapToViewModel(item, vm);
                     vmcoll.Add(vm);
                 }
 
@@ -182,6 +169,35 @@ namespace SqlTools.DatabaseConnections
                 vmcoll.Add(newvm);
             }
             return vmcoll;
+        }
+
+        /// <summary>
+        /// Converts a SqlConnectionViewModel to SqlConnectionDto for serialization.
+        /// </summary>
+        private static SqlConnectionDto ToDto(SqlConnectionViewModel vm)
+        {
+            return new SqlConnectionDto
+            {
+                CommandTimeout = vm.CommandTimeout,
+                ObjectDefinitionQuery = vm.ObjectDefinitionQuery,
+                ObjectNameQuery = vm.ObjectNameQuery,
+                ObjectSchemaQuery = vm.ObjectSchemaQuery,
+                ServerAndInstance = vm.ServerAndInstance,
+                UserName = vm.UserName
+            };
+        }
+
+        /// <summary>
+        /// Maps properties from SqlConnectionDto to an existing SqlConnectionViewModel instance.
+        /// </summary>
+        private static void MapToViewModel(SqlConnectionDto dto, SqlConnectionViewModel vm)
+        {
+            vm.CommandTimeout = dto.CommandTimeout;
+            vm.ObjectDefinitionQuery = dto.ObjectDefinitionQuery;
+            vm.ObjectNameQuery = dto.ObjectNameQuery;
+            vm.ObjectSchemaQuery = dto.ObjectSchemaQuery;
+            vm.ServerAndInstance = dto.ServerAndInstance;
+            vm.UserName = dto.UserName;
         }
     }
 }
