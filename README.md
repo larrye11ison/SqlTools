@@ -1,6 +1,6 @@
 # SqlTools
 
-An application for searching and browsing object scripts on Microsoft SQL Servers.
+An application written in .net 8 and WPF for searching and browsing object scripts on Microsoft SQL Servers.
 
 SqlTools can search by any or all of the following:
 
