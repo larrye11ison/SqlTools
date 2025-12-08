@@ -29,7 +29,8 @@ jobs:
     - name: Publish Build Artifacts
       # This command compiles your app and copies all necessary files 
       # (executables, dependencies) to the specified output folder.
-      run: dotnet publish --configuration Release --output ${{ github.workspace }}/app_build
+      run: dotnet publish ./SqlTools/SqlTools.csproj --configuration Release --output ${{ github.workspace }}/app_build
+
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
