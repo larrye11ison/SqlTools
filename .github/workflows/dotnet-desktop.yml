@@ -26,6 +26,7 @@ jobs:
       run: dotnet restore
       
     # 5. BUILD: Builds the entire solution (default configuration)
-    - name: Build
-      # Replace 'SqlTools.sln' with your actual solution file name
-      run: dotnet build --configuration Release --no-restore
+    - name: Publish Build Artifacts
+      # This command compiles your app and copies all necessary files 
+      # (executables, dependencies) to the specified output folder.
+      run: dotnet publish --configuration Release --output ${{ github.workspace }}/app_build
