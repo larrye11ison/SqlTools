@@ -30,3 +30,12 @@ jobs:
       # This command compiles your app and copies all necessary files 
       # (executables, dependencies) to the specified output folder.
       run: dotnet publish --configuration Release --output ${{ github.workspace }}/app_build
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        # Give your artifact a descriptive name
+        name: SqlTools-WPF-Build
+        # This must match the output folder used in the 'dotnet publish' step above
+        path: ${{ github.workspace }}/app_build
+        # Optional: Set retention days if you need to save space
+        retention-days: 7
