@@ -1,0 +1,31 @@
+name: .NET Core CI
+
+# 1. TRIGGER: Run this workflow whenever code is pushed to the main/master branch.
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    # 2. CHECKOUT: Checks out your code repository
+    - uses: actions/checkout@v4
+      
+    # 3. SETUP: Installs the correct .NET 8 SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    # 4. RESTORE: Restores all NuGet packages and dependencies
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    # 5. BUILD: Builds the entire solution (default configuration)
+    - name: Build
+      # Replace 'SqlTools.sln' with your actual solution file name
+      run: dotnet build --configuration Release --no-restore
