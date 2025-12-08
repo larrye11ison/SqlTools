@@ -14,37 +14,19 @@ namespace SqlTools.Shell
     {
         public ScriptedObjectDocumentViewModel ActiveTab { get; set; }
 
-        public bool CanAddNewConnection
-        {
-            get { return ObjectSearchVisible; }
-        }
+        public bool CanAddNewConnection => true; //ObjectSearchVisible;
 
-        public bool CanCloseCurrentDocument
-        {
-            get { return CanExecuteDocumentAction(); }
-        }
+		public bool CanCloseCurrentDocument => true; // ScriptedObjects?.ActiveItem != null;
 
-        public bool CanFindNext
-        {
-            get { return CanExecuteDocumentAction(); }
-        }
+        public bool CanFindNext => true; //ScriptedObjects?.ActiveItem != null;
 
-        public bool CanFindPrevious
-        {
-            get { return CanExecuteDocumentAction(); }
-        }
+		public bool CanFindPrevious => true; //ScriptedObjects?.ActiveItem != null;
 
-        public bool CanFindText
-        {
-            get { return CanExecuteDocumentAction(); }
-        }
+		public bool CanFindText => true; //ScriptedObjects?.ActiveItem != null;
 
-        public bool CanToggleSqlFormatOnCurrentDocument
-        {
-            get { return CanExecuteDocumentAction(); }
-        }
+		public bool CanToggleSqlFormatOnCurrentDocument => true; //ScriptedObjects?.ActiveItem != null;
 
-        [Import]
+		[Import]
         public IEventAggregator EventAggregator { get; set; }
 
         public ObjectSearchViewModel ObjectSearch { get; set; }
@@ -65,14 +47,6 @@ namespace SqlTools.Shell
             {
                 ObjectSearchVisible = true;
             }
-        }
-
-        public bool CanExecuteDocumentAction()
-        {
-            return true;
-            // TODO: why is this short circuited? I don't even remember...
-            //return ScriptedObjects.ActiveItem != null
-            //    && !ObjectSearchVisible;
         }
 
         public void ChangeSQLFont()
@@ -151,7 +125,16 @@ namespace SqlTools.Shell
 
         public void ToggleSqlFormatOnCurrentDocument()
         {
-            ScriptedObjects.ActiveItem.ToggleSqlFormat();
+            ScriptedObjects.ActiveItem?.ToggleSqlFormat();
+        }
+
+        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
+        {
+            if (close)
+            {
+                EventAggregator.Unsubscribe(this);
+            }
+            return base.OnDeactivateAsync(close, cancellationToken);
         }
 
         protected override async Task OnInitializedAsync(CancellationToken cancellationToken)

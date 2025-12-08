@@ -79,6 +79,15 @@ namespace SqlTools.Scripting
             DoItIfThereIsAnActiveItem(doc => doc.InitiateFindText());
         }
 
+        protected override Task OnDeactivateAsync(bool close, CancellationToken cancellationToken)
+        {
+            if (close)
+            {
+                eventagg?.Unsubscribe(this);
+            }
+            return base.OnDeactivateAsync(close, cancellationToken);
+        }
+
         protected override Task OnInitializedAsync(CancellationToken cancellationToken)
         {
             eventagg.SubscribeOnPublishedThread(this);
