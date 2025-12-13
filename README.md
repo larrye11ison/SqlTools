@@ -10,9 +10,9 @@ SqlTools can search by any or all of the following:
 * After a search is complete, you can further filter within the search results
  * Simply type one or more "search tokens" - words or parts of words separated by text
  * You can also filter specific fields within the results grid, ex.:
-  * type:stor  | filters the Type column to values containing "stor"
-  * db:foo  | filters the Database column to values containing "foo"
-  * there are at least 1 or 2 others that I cannot remember right now
+   * type:stor  | filters the Type column to values containing "stor"
+   * db:foo  | filters the Database column to values containing "foo"
+   * there are at least 1 or 2 others that I cannot remember right now
 
 ## Can you show me what it looks like?
 
