@@ -12,8 +12,8 @@ After a search is complete, you can further filter (case-insensitive) within the
 
  * Simply type one or more "search tokens" - words or parts of words separated by text - into the Filter box.
  * Or you can also target filter tokens to specific fields within the results grid, ex.:
-   * type:stor  | filters the Type column to values containing "stor"
-   * db:foo  | filters the Database column to values containing "foo"
+   * type:stor | filters the results to items where the Type column contains "stor"
+   * db:foo | filters the results to items where the Database column contains "foo"
    * There are at least 1 or 2 others that I cannot remember right now
    * Filter tokens can be negated with "^", e.g. "db:^xyz" will exclude any database whose name contains "xyz."
 
