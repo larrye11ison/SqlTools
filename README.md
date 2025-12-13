@@ -10,8 +10,10 @@ SqlTools can search by any or all of the following:
 
 After a search is complete, you can further filter (case-insensitive) within the search results:
 
- * Simply type one or more "search tokens" - words or parts of words separated by text - into the Filter box.
+ * Simply type one or more "filter tokens" - words or parts of words separated by text - into the Filter box.
+ * A logical AND operation will always be applied to all filter tokens
  * Or you can also target filter tokens to specific fields within the results grid, ex.:
+   * name:jason | filters the results to items where the Name column contains "jason"
    * type:stor | filters the results to items where the Type column contains "stor"
    * db:foo | filters the results to items where the Database column contains "foo"
    * There are at least 1 or 2 others that I cannot remember right now
