@@ -7,9 +7,11 @@ SqlTools can search by any or all of the following:
 * Object Name
 * Schema Name
 * Object Definition - you can search *inside* the text of the objects' definitions
-* After a search is complete, you can further filter within the search results
- * Simply type one or more "search tokens" - words or parts of words separated by text
- * You can also filter specific fields within the results grid, ex.:
+
+After a search is complete, you can further filter within the search results
+
+ * Simply type one or more "search tokens" - words or parts of words separated by text - into the Filter box.
+ * Or you can also target filter tokens to specific fields within the results grid, ex.:
    * type:stor  | filters the Type column to values containing "stor"
    * db:foo  | filters the Database column to values containing "foo"
    * there are at least 1 or 2 others that I cannot remember right now
