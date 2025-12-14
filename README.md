@@ -1,12 +1,23 @@
 # SqlTools
 
-An application for searching and browsing object scripts on Microsoft SQL Servers.
+An application written in .net 8 and WPF for searching and browsing object scripts on Microsoft SQL Servers.
 
 SqlTools can search by any or all of the following:
 
 * Object Name
 * Schema Name
 * Object Definition - you can search *inside* the text of the objects' definitions
+
+After a search is complete, you can further filter (case-insensitive) within the search results:
+
+ * Simply type one or more "filter tokens" - words or parts of words separated by text - into the Filter box.
+ * A logical AND operation will always be applied to all filter tokens
+ * Or you can also target filter tokens to specific fields within the results grid, ex.:
+   * name:jason | filters the results to items where the Name column contains "jason"
+   * type:stor | filters the results to items where the Type column contains "stor"
+   * db:foo | filters the results to items where the Database column contains "foo"
+   * There are at least 1 or 2 others that I cannot remember right now
+   * Filter tokens can be negated with "^", e.g. "db:^xyz" will exclude any database whose name contains "xyz."
 
 ## Can you show me what it looks like?
 
@@ -61,6 +72,8 @@ Sure, I've got nothing better to do...
   * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
   * Has option to canonicalize and reformat the object code using `Microsoft.SqlServer.TransactSql.ScriptDom`.
   * Incremental find within object definition scripts.
+* Why is there a donkey that's crossed out in the status bar at the bottom of the window?
+  * Because a wacky Guamanian that we worked with kept calling this tool "donkey" for some reason.
 
 ## Requirements
 

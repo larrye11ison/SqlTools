@@ -1,0 +1,42 @@
+name: .NET Core CI
+
+# 1. TRIGGER: Run this workflow whenever code is pushed to the main/master branch.
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    # 2. CHECKOUT: Checks out your code repository
+    - uses: actions/checkout@v4
+      
+    # 3. SETUP: Installs the correct .NET 8 SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    # 4. RESTORE: Restores all NuGet packages and dependencies
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    # 5. BUILD: Builds the entire solution (default configuration)
+    - name: Publish Build Artifacts
+      # This command compiles your app and copies all necessary files 
+      # (executables, dependencies) to the specified output folder.
+      run: dotnet publish ./SqlTools/SqlTools.csproj --configuration Release --output ${{ github.workspace }}/app_build
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        # Give your artifact a descriptive name
+        name: SqlTools-WPF-Build
+        # This must match the output folder used in the 'dotnet publish' step above
+        path: ${{ github.workspace }}/app_build
+        # Optional: Set retention days if you need to save space
+        retention-days: 7
