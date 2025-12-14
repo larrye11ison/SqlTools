@@ -71,6 +71,7 @@ Sure, I've got nothing better to do...
 * When viewing object definition scripts
   * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
   * Has option to canonicalize and reformat the object code using `Microsoft.SqlServer.TransactSql.ScriptDom`.
+    * HOWEVER... this formatting isn't really great at the moment, it needs a lot of refinement.
   * Incremental find within object definition scripts.
 * Why is there a donkey that's crossed out in the status bar at the bottom of the window?
   * Because a wacky Guamanian that we worked with kept calling this tool "donkey" for some reason.
