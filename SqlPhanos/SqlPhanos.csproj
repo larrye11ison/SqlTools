@@ -1,0 +1,58 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    
+    <!-- Application Icon Configuration -->
+    <!-- This icon will be used for: executable file, taskbar, alt-tab, start menu -->
+    <ApplicationIcon>Assets\sqlphanos.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Models\" />
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Avalonia 11.x -->
+    <PackageReference Include="Avalonia" Version="11.3.10" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.10" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.10">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    
+    <!-- MVVM Toolkit -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
+    
+    <!-- Data Access -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.1.6" />
+    
+    <!-- Docking -->
+    <PackageReference Include="Dock.Avalonia" Version="11.2.0" />
+    <PackageReference Include="Dock.Model.Avalonia" Version="11.2.0" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="11.2.0" />
+    
+    <!-- TreeDataGrid -->
+    <PackageReference Include="Avalonia.Controls.TreeDataGrid" Version="11.0.10" />
+
+    <!-- ReactiveUI -->
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.1.0" />
+
+    <!-- Icons -->
+    <PackageReference Include="Projektanker.Icons.Avalonia" Version="9.4.0" />
+    <PackageReference Include="Projektanker.Icons.Avalonia.FontAwesome" Version="9.4.0" />
+
+    <!-- SMO -->
+    <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
+
+    <!-- Text Editor - Avalonia 11 compatible version -->
+    <ProjectReference Include="..\external\AvaloniaEdit\src\AvaloniaEdit\AvaloniaEdit.csproj" />
+    <ProjectReference Include="..\external\AvaloniaEdit\src\AvaloniaEdit.TextMate\AvaloniaEdit.TextMate.csproj" />
+  </ItemGroup>
+</Project>
