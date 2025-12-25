@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="200"
+             x:Class="SqlPhanos.Views.SearchResultsView"
+             x:DataType="vm:SearchResultsViewModel">
+    
+    <UserControl.Resources>
+        <DataTemplate x:Key="ScriptCellTemplate" DataType="vm:SearchResultViewModel">
+            <Button Content="Script" 
+                    Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                    CommandParameter="{Binding}"
+                    IsEnabled="{Binding CanScriptObject}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="4,2"
+                    FontSize="11"/>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- Filter Controls -->
+        <Border Grid.Row="0" Padding="4" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+            <Grid ColumnDefinitions="*,*,*,*,*">
+                <TextBox Grid.Column="0" Text="{Binding FilterGeneral}" Watermark="General Filter" Margin="2"/>
+                <TextBox Grid.Column="1" Text="{Binding FilterName}" Watermark="Name" Margin="2"/>
+                <TextBox Grid.Column="2" Text="{Binding FilterSchema}" Watermark="Schema" Margin="2"/>
+                <TextBox Grid.Column="3" Text="{Binding FilterDb}" Watermark="DB" Margin="2"/>
+                <TextBox Grid.Column="4" Text="{Binding FilterType}" Watermark="Type" Margin="2"/>
+            </Grid>
+        </Border>
+
+        <!-- Results Grid -->
+        <TreeDataGrid Grid.Row="1" Source="{Binding Source}" />
+    </Grid>
+</UserControl>

@@ -1,0 +1,100 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="400"
+             x:Class="SqlPhanos.Views.SearchView"
+             x:DataType="vm:SearchViewModel">
+    
+    <Grid>
+        <!-- Main Content -->
+        <DockPanel IsEnabled="{Binding !ShowDeleteConfirmation}">
+            <!-- Connection Bar -->
+            <Border DockPanel.Dock="Top" Padding="5" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                    <ComboBox Grid.Column="0" 
+                              ItemsSource="{Binding Connections}" 
+                              SelectedItem="{Binding SelectedConnection}"
+                              HorizontalAlignment="Stretch"
+                              Margin="0,0,5,0">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ServerAndInstance}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    
+                    <Button Grid.Column="1" Command="{Binding AddConnectionCommand}" i:Attached.Icon="fa-solid fa-plus" ToolTip.Tip="Add Connection" Margin="2,0"/>
+                    <Button Grid.Column="2" Command="{Binding EditConnectionCommand}" i:Attached.Icon="fa-solid fa-pen" ToolTip.Tip="Edit Connection" Margin="2,0"/>
+                    <Button Grid.Column="3" Command="{Binding DeleteConnectionCommand}" i:Attached.Icon="fa-solid fa-trash" ToolTip.Tip="Delete Connection" Margin="2,0"/>
+                </Grid>
+            </Border>
+
+            <!-- Connection Editor (Overlay/Expandable) -->
+            <Border DockPanel.Dock="Top" 
+                    IsVisible="{Binding IsEditing}" 
+                    Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="10">
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Server:" VerticalAlignment="Center" Margin="0,0,5,5"/>
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EditingConnection.ServerAndInstance}" Margin="0,0,0,5"/>
+
+                    <CheckBox Grid.Row="1" Grid.Column="1" Content="Use Windows Authentication" IsChecked="{Binding EditingConnection.UseWindowsAuth}" Margin="0,0,0,5"/>
+                    
+                    <CheckBox Grid.Row="2" Grid.Column="1" Content="Trust Server Certificate" IsChecked="{Binding EditingConnection.TrustServerCertificate}" Margin="0,0,0,5"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="User:" VerticalAlignment="Center" Margin="0,0,5,5"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EditingConnection.UserName}" IsEnabled="{Binding !EditingConnection.UseWindowsAuth}" Margin="0,0,0,5"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Password:" VerticalAlignment="Center" Margin="0,0,5,5"/>
+                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding EditingConnection.Password}" PasswordChar="*" IsEnabled="{Binding !EditingConnection.UseWindowsAuth}" Margin="0,0,0,5"/>
+
+                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button Command="{Binding SaveConnectionCommand}" Content="Save" Classes="accent" Margin="0,0,5,0"/>
+                        <Button Command="{Binding CancelEditCommand}" Content="Cancel"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Search Params (Placeholder for now) -->
+            <StackPanel Margin="10">
+                <TextBlock Text="Search Parameters" FontWeight="Bold" Margin="0,0,0,5"/>
+                <TextBlock Text="Object Name:" Margin="0,5,0,0"/>
+                <TextBox x:Name="ObjectNameBox" Text="{Binding ObjectNameQuery}" Watermark="e.g. Customers"/>
+                
+                <TextBlock Text="Schema:" Margin="0,5,0,0"/>
+                <TextBox Text="{Binding SchemaQuery}" Watermark="e.g. dbo"/>
+                
+                <TextBlock Text="Definition:" Margin="0,5,0,0"/>
+                <TextBox Text="{Binding DefinitionQuery}" Watermark="e.g. CREATE TABLE"/>
+                
+                <Button Command="{Binding SearchCommand}" Content="Search" HorizontalAlignment="Right" Margin="0,10,0,0" IsEnabled="{Binding !IsSearching}" IsDefault="True"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Delete Confirmation Overlay -->
+        <Grid IsVisible="{Binding ShowDeleteConfirmation}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}" 
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="300">
+                <StackPanel>
+                    <TextBlock Text="Confirm Delete" FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+                    <TextBlock Text="Are you sure you want to delete this connection?" TextWrapping="Wrap" Margin="0,0,0,20"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Command="{Binding ConfirmDeleteCommand}" Content="Delete" Background="Red" Foreground="White" Margin="0,0,10,0"/>
+                        <Button Command="{Binding CancelDeleteCommand}" Content="Cancel"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
