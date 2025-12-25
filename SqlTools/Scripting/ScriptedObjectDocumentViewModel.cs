@@ -188,6 +188,21 @@ namespace SqlTools.Scripting
             NotifyOfPropertyChange(() => Title);
         }
 
+        /// <summary>
+        /// TEMPORARY TEST METHOD - Initialize document from a file (not from database)
+        /// TODO: REMOVE THIS METHOD when formatting testing is complete
+        /// </summary>
+        public void InitializeFromFile(string filePath, string fileContent)
+        {
+            SqlText = fileContent;
+            _originalSqlText = fileContent;
+            TypeDescription = "TEST_FILE";
+            DisplayName = Path.GetFileName(filePath);
+            CanonicalName = filePath;
+            IsLoadingDefinition = false;
+            NotifyOfPropertyChange(() => Title);
+        }
+
         public void InitiateFindText()
         {
             findTextBox?.Focus();
@@ -425,6 +440,8 @@ namespace SqlTools.Scripting
                 bool inFunctionCall = false;
                 bool inInClause = false;
                 int inClauseStartIndex = -1;
+                bool inCreateStatementParams = false; // Track if we're in CREATE statement parameter list
+                bool afterCreateObjectName = false; // Track if we just passed the object name after CREATE
 
                 for (int i = 0; i < tokens.Count; i++)
                 {
@@ -433,25 +450,73 @@ namespace SqlTools.Scripting
                     // Apply formatting rules based on token type
                     switch (token.TokenType)
                     {
-                        case TSqlTokenType.As:
-                            // AS should always be on its own line like GO
-                            if (!lineStart)
-                            {
-                                result.Append(Environment.NewLine);
-                                lineStart = true;
-                            }
-
+                        case TSqlTokenType.Create:
                             if (lineStart)
                             {
                                 result.Append(new string(' ', indentLevel * 4));
                                 lineStart = false;
                             }
-
                             result.Append(token.Text.ToUpperInvariant());
+                            
+                            // Mark that we're starting a CREATE statement
+                            // We'll handle the newline after the object name
+                            afterCreateObjectName = false;
+                            break;
 
-                            // Force newline after AS
-                            result.Append(Environment.NewLine);
-                            lineStart = true;
+                        case TSqlTokenType.Proc:
+                        case TSqlTokenType.Procedure:
+                        case TSqlTokenType.Function:
+                        case TSqlTokenType.View:
+                        case TSqlTokenType.Trigger:
+                            if (lineStart)
+                            {
+                                result.Append(new string(' ', indentLevel * 4));
+                                lineStart = false;
+                            }
+                            result.Append(token.Text.ToUpperInvariant());
+                            
+                            // After PROCEDURE/FUNCTION keyword, next non-whitespace will be object name
+                            // We need to force newline after that object name
+                            afterCreateObjectName = true;
+                            break;
+
+                        case TSqlTokenType.As:
+                            // Context-aware AS handling
+                            // Check if we're in a CREATE statement context (not inside parentheses like CAST)
+                            bool isCreateContextAs = (parenthesisDepth == 0 || inCreateStatementParams);
+                            
+                            if (isCreateContextAs)
+                            {
+                                // AS in CREATE statement context - put on its own line
+                                if (!lineStart)
+                                {
+                                    result.Append(Environment.NewLine);
+                                    lineStart = true;
+                                }
+                                
+                                if (lineStart)
+                                {
+                                    result.Append(new string(' ', indentLevel * 4));
+                                    lineStart = false;
+                                }
+                                
+                                result.Append(token.Text.ToUpperInvariant());
+                                
+                                // Force newline after AS
+                                result.Append(Environment.NewLine);
+                                lineStart = true;
+                                inCreateStatementParams = false; // No longer in parameter list
+                            }
+                            else
+                            {
+                                // AS in expression context (like CAST) - just space around it
+                                if (!lineStart && result.Length > 0 && result[result.Length - 1] != ' ')
+                                {
+                                    result.Append(" ");
+                                }
+                                result.Append(token.Text.ToUpperInvariant());
+                                result.Append(" ");
+                            }
                             break;
 
                         case TSqlTokenType.Begin:
@@ -615,11 +680,22 @@ namespace SqlTools.Scripting
                             result.Append(token.Text.ToUpperInvariant());
                             break;
 
+                        case TSqlTokenType.Dot:
+                            // Dots connect identifiers - never add line breaks or spaces around them
+                            result.Append(token.Text);
+                            break;
+
                         case TSqlTokenType.Comma:
                             result.Append(token.Text);
 
                             // Determine if we should newline after comma
-                            if (inSelectColumnList && selectStatementDepth > 0)
+                            if (inCreateStatementParams)
+                            {
+                                // In CREATE statement parameter list: newline after comma
+                                result.Append(Environment.NewLine);
+                                lineStart = true;
+                            }
+                            else if (inSelectColumnList && selectStatementDepth > 0)
                             {
                                 // In SELECT column list: newline after comma
                                 result.Append(Environment.NewLine);
@@ -675,7 +751,8 @@ namespace SqlTools.Scripting
                                 inFunctionCall = true;
                             }
 
-                            if (lineStart)
+                            // In CREATE parameter list, don't add newlines - keep on same line
+                            if (lineStart && !inCreateStatementParams)
                             {
                                 int extraIndent = (inSelectColumnList && selectStatementDepth > 0) ? 1 : 0;
                                 result.Append(new string(' ', (indentLevel + extraIndent) * 4));
@@ -685,7 +762,7 @@ namespace SqlTools.Scripting
                             result.Append(token.Text);
 
                             // Check if next significant token is SELECT (subquery)
-                            if (!isFunctionCall)
+                            if (!isFunctionCall && !inCreateStatementParams)
                             {
                                 int nextSelectIdx = i + 1;
                                 while (nextSelectIdx < tokens.Count && tokens[nextSelectIdx].TokenType == TSqlTokenType.WhiteSpace)
@@ -736,6 +813,16 @@ namespace SqlTools.Scripting
                             if (parenthesisDepth == 0)
                             {
                                 inFunctionCall = false;
+                                // Exiting CREATE parameter list
+                                if (inCreateStatementParams)
+                                {
+                                    result.Append(token.Text);
+                                    // Force newline after closing paren of parameter list
+                                    result.Append(Environment.NewLine);
+                                    lineStart = true;
+                                    inCreateStatementParams = false;
+                                    break;
+                                }
                             }
 
                             result.Append(token.Text);
@@ -788,9 +875,20 @@ namespace SqlTools.Scripting
                             break;
 
                         case TSqlTokenType.SingleLineComment:
+                            // If we were after object name, this comment starts the parameter section
+                            if (afterCreateObjectName)
+                            {
+                                result.Append(Environment.NewLine);
+                                lineStart = true;
+                                afterCreateObjectName = false;
+                                inCreateStatementParams = true;
+                            }
+                            
                             if (lineStart)
                             {
                                 int extraIndent = (inSelectColumnList && selectStatementDepth > 0) ? 1 : 0;
+                                // Add extra indent if in CREATE parameter list
+                                if (inCreateStatementParams) extraIndent = 1;
                                 result.Append(new string(' ', (indentLevel + extraIndent) * 4));
                                 lineStart = false;
                             }
@@ -807,6 +905,8 @@ namespace SqlTools.Scripting
                             if (lineStart)
                             {
                                 int extraIndent = (inSelectColumnList && selectStatementDepth > 0) ? 1 : 0;
+                                // Add extra indent if in CREATE parameter list
+                                if (inCreateStatementParams) extraIndent = 1;
                                 result.Append(new string(' ', (indentLevel + extraIndent) * 4));
                                 lineStart = false;
                             }
@@ -818,10 +918,67 @@ namespace SqlTools.Scripting
                             previousWasStatementEnd = false;
                             break;
 
+                        case TSqlTokenType.Identifier:
+                        case TSqlTokenType.QuotedIdentifier:
+                            // Check if this is part of the object name after CREATE PROCEDURE/FUNCTION/etc.
+                            if (afterCreateObjectName && !token.Text.StartsWith("@"))
+                            {
+                                if (lineStart)
+                                {
+                                    result.Append(new string(' ', indentLevel * 4));
+                                    lineStart = false;
+                                }
+                                result.Append(token.Text);
+                                
+                                // DON'T force newline yet - object name might be multi-part like [dbo].[ProcName]
+                                // Keep afterCreateObjectName = true and wait for next token
+                                break;
+                            }
+                            
+                            // Check if this is a parameter (starts with @)
+                            if (token.Text.StartsWith("@"))
+                            {
+                                // Entering parameter list - if we were after object name, force newline first
+                                if (afterCreateObjectName)
+                                {
+                                    result.Append(Environment.NewLine);
+                                    lineStart = true;
+                                    afterCreateObjectName = false;
+                                }
+                                
+                                // Set parameter mode
+                                inCreateStatementParams = true;
+                                
+                                // Output parameter with proper indent
+                                if (lineStart)
+                                {
+                                    result.Append(new string(' ', (indentLevel + 1) * 4));
+                                    lineStart = false;
+                                }
+                                result.Append(token.Text);
+                                previousWasStatementEnd = false;
+                                break;
+                            }
+                            
+                            // Default identifier handling (non-parameter identifiers)
+                            if (lineStart)
+                            {
+                                int extraIndent = (inSelectColumnList && selectStatementDepth > 0) ? 1 : 0;
+                                // Add extra indent if in CREATE parameter list
+                                if (inCreateStatementParams) extraIndent = 1;
+                                result.Append(new string(' ', (indentLevel + extraIndent) * 4));
+                                lineStart = false;
+                            }
+                            result.Append(token.Text);
+                            previousWasStatementEnd = false;
+                            break;
+
                         default:
                             if (lineStart)
                             {
                                 int extraIndent = (inSelectColumnList && selectStatementDepth > 0) ? 1 : 0;
+                                // Add extra indent if in CREATE parameter list
+                                if (inCreateStatementParams) extraIndent = 1;
                                 result.Append(new string(' ', (indentLevel + extraIndent) * 4));
                                 lineStart = false;
                             }

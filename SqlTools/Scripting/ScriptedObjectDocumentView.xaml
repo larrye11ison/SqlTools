@@ -7,6 +7,21 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d">
+    <UserControl.Resources>
+        <!-- Converter for boolean to visibility -->
+        <BooleanToVisibilityConverter x:Key="BoolToVisConverter"/>
+        
+        <!-- Style for formatting indicator -->
+        <Style x:Key="FormatIndicatorStyle" TargetType="Border">
+            <Setter Property="Background" Value="#E8F5E9"/>
+            <Setter Property="BorderBrush" Value="#4CAF50"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="Padding" Value="6,3"/>
+            <Setter Property="Margin" Value="5,0,0,0"/>
+        </Style>
+    </UserControl.Resources>
+    
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -22,6 +37,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Image Width="20"
                        Height="20"
@@ -36,6 +52,30 @@
                            Margin="3"
                            VerticalAlignment="Center"
                            Text="{Binding FindText.Description}" />
+                
+                <!-- Formatting Status Indicator -->
+                <Border Grid.Column="3"
+                        Style="{StaticResource FormatIndicatorStyle}"
+                        Visibility="{Binding FormatSql, Converter={StaticResource BoolToVisConverter}}"
+                        ToolTip="SQL formatting is active - viewing canonical formatted version">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Format Icon (stylized text alignment icon) -->
+                        <Viewbox Width="16" Height="16" Margin="0,0,4,0">
+                            <Canvas Width="24" Height="24">
+                                <!-- Lines representing formatted text -->
+                                <Rectangle Canvas.Left="4" Canvas.Top="4" Width="16" Height="2" Fill="#4CAF50"/>
+                                <Rectangle Canvas.Left="4" Canvas.Top="9" Width="12" Height="2" Fill="#4CAF50"/>
+                                <Rectangle Canvas.Left="4" Canvas.Top="14" Width="16" Height="2" Fill="#4CAF50"/>
+                                <Rectangle Canvas.Left="4" Canvas.Top="19" Width="10" Height="2" Fill="#4CAF50"/>
+                            </Canvas>
+                        </Viewbox>
+                        <TextBlock Text="Formatted" 
+                                   FontSize="11" 
+                                   FontWeight="SemiBold"
+                                   Foreground="#2E7D32"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
 

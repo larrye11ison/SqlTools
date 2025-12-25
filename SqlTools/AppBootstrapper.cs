@@ -93,9 +93,9 @@ namespace SqlTools
                 var log = LogManager.GetLog(typeof(AppBootstrapper));
                 log.Error(ex);
                 MessageBox.Show(
-                    $"Application startup failed: {ex.Message}\n\nSee log for details.", 
-                    "Startup Error", 
-                    MessageBoxButton.OK, 
+                    $"Application startup failed: {ex.Message}\n\nSee log for details.",
+                    "Startup Error",
+                    MessageBoxButton.OK,
                     MessageBoxImage.Error);
                 Application.Current.Shutdown(-1);
             }
