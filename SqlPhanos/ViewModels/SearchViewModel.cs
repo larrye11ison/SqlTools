@@ -8,10 +8,11 @@ using CommunityToolkit.Mvvm.Messaging;
 using SqlPhanos.Enums;
 using SqlPhanos.Messages;
 using SqlPhanos.Services;
+using Dock.Model.Mvvm.Controls;
 
 namespace SqlPhanos.ViewModels;
 
-public partial class SearchViewModel : ObservableObject, IRecipient<ScriptObjectRequestMessage>
+public partial class SearchViewModel : Tool, IRecipient<ScriptObjectRequestMessage>
 {
     private readonly SqlSearchService _searchService = new();
 
@@ -46,6 +47,9 @@ public partial class SearchViewModel : ObservableObject, IRecipient<ScriptObject
 
     public SearchViewModel()
     {
+        Id = "Search";
+        Title = "Search";
+
         // Add some dummy connections for testing
         Connections.Add(new SqlConnectionViewModel { ServerAndInstance = "LOCALHOST", UseWindowsAuth = true });
         Connections.Add(new SqlConnectionViewModel { ServerAndInstance = "PROD-DB-01", UseWindowsAuth = false, UserName = "sa" });
