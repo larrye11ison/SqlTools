@@ -23,13 +23,17 @@ namespace SqlPhanos.Docking
 
         public override IRootDock CreateLayout()
         {
+            // Cast to IDockable for Dock.Model compatibility
+            var searchViewModelDockable = (IDockable)_searchViewModel;
+            var searchResultsViewModelDockable = (IDockable)_searchResultsViewModel;
+
             var searchDock = new ToolDock
             {
                 Id = "SearchDock",
                 Title = "Search",
                 Proportion = 0.25,
-                ActiveDockable = _searchViewModel,
-                VisibleDockables = CreateList<IDockable>(_searchViewModel)
+                ActiveDockable = searchViewModelDockable,
+                VisibleDockables = CreateList<IDockable>(searchViewModelDockable)
             };
 
             var searchResultsDock = new ToolDock
@@ -37,8 +41,8 @@ namespace SqlPhanos.Docking
                 Id = "SearchResultsDock",
                 Title = "Search Results",
                 Proportion = 0.25,
-                ActiveDockable = _searchResultsViewModel,
-                VisibleDockables = CreateList<IDockable>(_searchResultsViewModel)
+                ActiveDockable = searchResultsViewModelDockable,
+                VisibleDockables = CreateList<IDockable>(searchResultsViewModelDockable)
             };
 
             var documentDock = new DocumentDock
