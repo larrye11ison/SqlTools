@@ -14,6 +14,8 @@ public partial class SqlDocumentViewModel : Document
     [ObservableProperty]
     private string _sqlText = "";
 
+    public string SyntaxScopeName => "source.sql";
+
     public SqlDocumentViewModel()
     {
         Title = "SQL Script";

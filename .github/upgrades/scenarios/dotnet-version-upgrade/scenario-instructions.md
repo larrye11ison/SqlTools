@@ -30,7 +30,15 @@
 - **UI Architecture**: Ensure the UI layer properly follows MVVM patterns as intended by CommunityToolkit.Mvvm
 - **Avalonia Dependencies**: Use only official Avalonia NuGet packages from NuGet; do not rely on local or forked Avalonia code
 - **SqlPhanos Requirement**: Syntax highlighting for scripted SQL definitions in SqlPhanos is mandatory; Avalonia is preferred unless another approach is more reliable
+- **Forked Editor Projects**: Keep `AvaloniaEdit` and `AvaloniaEdit.TextMate` out of the main solution; use official NuGet packages instead
+- **Icon Packages**: Replace the incompatible Projektanker icon packages in SqlPhanos
+
+### Execution Style
+- **Completion Mode**: Continue automatically through the remaining tasks until all four are complete unless blocked
 
 ## Key Decisions Log
 - Initialized the .NET version upgrade workflow on branch `upgrade-to-NET10` targeting .NET 10 with CommunityToolkit.Mvvm-only UI guidance and official Avalonia NuGet packages.
 - Selected the Hybrid strategy so Avalonia dependency/UI modernization can complete before the higher-risk WPF compatibility work in `SqlTools`.
+- Confirmed that the local forked `AvaloniaEdit` and `AvaloniaEdit.TextMate` projects should not remain in `SqlTools.sln`.
+- Continue automatically through the remaining tasks unless blocked.
+- Replace the incompatible Projektanker icon packages in `SqlPhanos` as follow-up runtime stabilization work.

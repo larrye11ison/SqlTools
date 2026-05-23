@@ -3,12 +3,18 @@
   "operationId": "26100ac1-b15e-4684-9e20-c671ce95ab0d",
   "description": "Upgrade .NET projects to newer .NET versions",
   "startTime": "2026-05-23T00:50:05.4317342Z",
-  "lastUpdateTime": "2026-05-23T00:53:11.7545722Z",
+  "lastUpdateTime": "2026-05-23T01:26:03.6324602Z",
   "stage": "Assessment",
   "properties": {
-    "currentTask": "01-official-avalonia-editor-dependencies",
+    "currentTask": "04-cross-project-validation",
+    "task:03-sqltools-net10-compatibility:startedAt": "2026-05-23T01:22:49.5203765Z",
     "task:01-official-avalonia-editor-dependencies:startedAt": "2026-05-23T00:53:11.7250245Z",
-    "UpgradeTargetFramework": "net10.0"
+    "task:02-sqlphanos-mvvm-toolkit-ui:startedAt": "2026-05-23T01:12:31.7026116Z",
+    "task:03.02-sqltools-compile-fixes:startedAt": "2026-05-23T01:24:54.6709201Z",
+    "task:04-cross-project-validation:startedAt": "2026-05-23T01:26:03.6324602Z",
+    "task:03.01-sqltools-retarget-packages:startedAt": "2026-05-23T01:23:44.1320058Z",
+    "UpgradeTargetFramework": "net10.0",
+    "task:03.03-sqltools-validation:startedAt": "2026-05-23T01:25:23.3272971Z"
   },
   "folderPath": ""
 }

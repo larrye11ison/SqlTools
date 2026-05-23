@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
     <OutputType>WinExe</OutputType>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
@@ -21,10 +21,10 @@
     </DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <PackageReference Include="AvalonEdit" Version="6.2.0.78" />
     <PackageReference Include="Azure.Core" Version="1.57.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Caliburn.Micro" Version="5.0.258" />
+    <PackageReference Include="Caliburn.Micro" Version="4.0.230" />
     <PackageReference Include="Caliburn.Micro.Core" Version="5.0.258" />
     <PackageReference Include="Fody" Version="6.9.3" PrivateAssets="All" />
     <PackageReference Include="LinqKit" Version="1.3.11" />
@@ -47,7 +47,7 @@
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.18.0" />
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="181.19.0" />
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.18.1" />
-    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.142" />
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.39" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="PropertyChanged.Fody" Version="4.1.0" PrivateAssets="All" />
     <PackageReference Include="System.ClientModel" Version="1.13.0" />

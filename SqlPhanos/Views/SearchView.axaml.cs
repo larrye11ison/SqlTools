@@ -1,14 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
-using Avalonia.ReactiveUI;
-using ReactiveUI;
-using SqlPhanos.ViewModels;
-using System;
-using System.Reactive.Linq;
 
 namespace SqlPhanos.Views;
 
-public partial class SearchView : ReactiveUserControl<SearchViewModel>
+public partial class SearchView : UserControl
 {
     public SearchView()
     {

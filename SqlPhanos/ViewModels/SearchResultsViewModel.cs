@@ -2,13 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Reactive.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Mvvm.Controls;
-using ReactiveUI;
 using SqlPhanos.Messages;
 using SqlPhanos.Services;
 
@@ -43,22 +41,8 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
         Id = "SearchResults";
         Title = "Search Results";
 
-        // Register for messages
         WeakReferenceMessenger.Default.Register(this);
-
-        // Initial population (empty)
         UpdateFilteredResults();
-
-        // Setup live filtering
-        this.WhenAnyValue(
-                x => x.FilterName,
-                x => x.FilterSchema,
-                x => x.FilterDb,
-                x => x.FilterType,
-                x => x.FilterGeneral)
-            .Throttle(TimeSpan.FromMilliseconds(200))
-            .ObserveOn(RxApp.MainThreadScheduler)
-            .Subscribe(_ => UpdateFilteredResults());
     }
 
     public void Receive(SearchResultsMessage message)
@@ -71,18 +55,24 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
         UpdateFilteredResults();
     }
 
+    partial void OnFilterDbChanged(string value) => UpdateFilteredResults();
+    partial void OnFilterGeneralChanged(string value) => UpdateFilteredResults();
+    partial void OnFilterNameChanged(string value) => UpdateFilteredResults();
+    partial void OnFilterSchemaChanged(string value) => UpdateFilteredResults();
+    partial void OnFilterTypeChanged(string value) => UpdateFilteredResults();
+
     private bool Matches(string? value, string filter)
     {
         if (string.IsNullOrEmpty(value)) return false;
 
-        bool negate = false;
+        var negate = false;
         if (filter.StartsWith("!"))
         {
             negate = true;
             filter = filter.Substring(1);
         }
 
-        bool contains = value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        var contains = value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         return negate ? !contains : contains;
     }
 
@@ -91,19 +81,8 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
     {
         if (item == null) return;
 
-        // We need the connection string.
-        // Ideally, the item should carry the connection info or we get it from SearchViewModel.
-        // For now, let's assume we can get it from the SearchViewModel via a message or shared service.
-        // Or better, let's pass the connection string in the SearchResultViewModel or SearchResultsMessage.
-        // But SearchResultViewModel is just data.
-
-        // Let's request the current connection from SearchViewModel via a RequestMessage or similar?
-        // Or simply, let's assume the SearchViewModel is the source of truth and we can ask it.
-        // Actually, since we are in a decoupled architecture, maybe we should send a "ScriptRequestMessage"
-        // and let SearchViewModel handle the scripting?
-        // That seems cleaner as SearchViewModel holds the connection state.
-
         WeakReferenceMessenger.Default.Send(new ScriptObjectRequestMessage(item));
+        await Task.CompletedTask;
     }
 
     private void UpdateFilteredResults()
@@ -117,8 +96,7 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
 
             if (!string.IsNullOrWhiteSpace(FilterGeneral))
             {
-                // General filter searches across multiple fields
-                bool matchesGeneral =
+                var matchesGeneral =
                     Matches(item.ObjectName, FilterGeneral) ||
                     Matches(item.SchemaName, FilterGeneral) ||
                     Matches(item.DbName, FilterGeneral) ||

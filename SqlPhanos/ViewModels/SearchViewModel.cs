@@ -5,6 +5,7 @@ using Dock.Model.Mvvm.Controls;
 using SqlPhanos.Messages;
 using SqlPhanos.Services;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 
@@ -13,7 +14,8 @@ namespace SqlPhanos.ViewModels
 	public partial class SearchViewModel : Tool, IRecipient<ScriptObjectRequestMessage>
 	{
 		private readonly SqlSearchService _searchService = new();
-		
+		private readonly ConnectionProfileStoreService _connectionProfileStoreService = new();
+
 		[ObservableProperty]
 		private ObservableCollection<SqlConnectionViewModel> _connections = new();
 
@@ -21,15 +23,17 @@ namespace SqlPhanos.ViewModels
 		private string _definitionQuery = "";
 
 		[ObservableProperty]
-		private SqlConnectionViewModel? _editingConnection;
+		private SqlConnectionViewModel _editingConnection = new();
 
 		private bool _isAddingNew;
 
 		[ObservableProperty]
-		private bool _isEditing;
+		[NotifyPropertyChangedFor(nameof(CanSearch))]
+		[NotifyCanExecuteChangedFor(nameof(SearchCommand))]
+		private bool _isSearching;
 
 		[ObservableProperty]
-		private bool _isSearching;
+		private bool _isEditing;
 
 		[ObservableProperty]
 		private string _objectNameQuery = "";
@@ -38,23 +42,29 @@ namespace SqlPhanos.ViewModels
 		private string _schemaQuery = "";
 
 		[ObservableProperty]
+		[NotifyPropertyChangedFor(nameof(CanDeleteSelectedConnection))]
+		[NotifyPropertyChangedFor(nameof(CanEditSelectedConnection))]
+		[NotifyPropertyChangedFor(nameof(CanSearch))]
+		[NotifyCanExecuteChangedFor(nameof(DeleteConnectionCommand))]
+		[NotifyCanExecuteChangedFor(nameof(EditConnectionCommand))]
+		[NotifyCanExecuteChangedFor(nameof(SearchCommand))]
 		private SqlConnectionViewModel? _selectedConnection;
 
 		[ObservableProperty]
 		private bool _showDeleteConfirmation;
 
+		public bool CanDeleteSelectedConnection => SelectedConnection is not null;
+
+		public bool CanEditSelectedConnection => SelectedConnection is not null;
+
+		public bool CanSearch => !IsSearching && SelectedConnection is not null;
+
 		public SearchViewModel()
 		{
-			// Make this view model a dockable Tool
 			Id = "Search";
 			Title = "Search";
 
-			// Add some dummy connections for testing
-			Connections.Add(new SqlConnectionViewModel { ServerAndInstance = "LOCALHOST", UseWindowsAuth = true });
-			Connections.Add(new SqlConnectionViewModel { ServerAndInstance = "PROD-DB-01", UseWindowsAuth = false, UserName = "sa" });
-
-			SelectedConnection = Connections.Count > 0 ? Connections[0] : null;
-
+			LoadConnections();
 			WeakReferenceMessenger.Default.Register<ScriptObjectRequestMessage>(this);
 		}
 
@@ -66,9 +76,10 @@ namespace SqlPhanos.ViewModels
 		[RelayCommand]
 		private void AddConnection()
 		{
-			EditingConnection = new SqlConnectionViewModel { ServerAndInstance = "New Server", UseWindowsAuth = true, TrustServerCertificate = true };
+			EditingConnection = new SqlConnectionViewModel { ServerAndInstance = "", UseWindowsAuth = true, TrustServerCertificate = true };
 			_isAddingNew = true;
 			IsEditing = true;
+			PublishStatus("Enter SQL Server connection details.");
 		}
 
 		[RelayCommand]
@@ -81,7 +92,8 @@ namespace SqlPhanos.ViewModels
 		private void CancelEdit()
 		{
 			IsEditing = false;
-			EditingConnection = null;
+			EditingConnection = new SqlConnectionViewModel();
+			PublishStatus("Connection edit cancelled.");
 		}
 
 		[RelayCommand]
@@ -91,6 +103,8 @@ namespace SqlPhanos.ViewModels
 			{
 				Connections.Remove(SelectedConnection);
 				SelectedConnection = Connections.Count > 0 ? Connections[0] : null;
+				SaveConnections();
+				PublishStatus("Connection removed.");
 			}
 			ShowDeleteConfirmation = false;
 		}
@@ -109,7 +123,6 @@ namespace SqlPhanos.ViewModels
 		{
 			if (SelectedConnection == null) return;
 
-			// Clone the selected connection for editing
 			EditingConnection = new SqlConnectionViewModel
 			{
 				ServerAndInstance = SelectedConnection.ServerAndInstance,
@@ -120,69 +133,105 @@ namespace SqlPhanos.ViewModels
 			};
 			_isAddingNew = false;
 			IsEditing = true;
+			PublishStatus($"Editing connection '{SelectedConnection.ServerAndInstance}'.");
 		}
 
 		[RelayCommand]
 		private void SaveConnection()
 		{
-			if (EditingConnection == null) return;
+			if (string.IsNullOrWhiteSpace(EditingConnection.ServerAndInstance))
+			{
+				PublishStatus("Server name is required.");
+				return;
+			}
 
 			if (_isAddingNew)
 			{
 				Connections.Add(EditingConnection);
 				SelectedConnection = EditingConnection;
+				SaveConnections();
+				PublishStatus($"Added connection '{EditingConnection.ServerAndInstance}'.");
 			}
 			else if (SelectedConnection != null)
 			{
-				// Update existing connection
 				SelectedConnection.ServerAndInstance = EditingConnection.ServerAndInstance;
 				SelectedConnection.UseWindowsAuth = EditingConnection.UseWindowsAuth;
 				SelectedConnection.UserName = EditingConnection.UserName;
 				SelectedConnection.Password = EditingConnection.Password;
 				SelectedConnection.TrustServerCertificate = EditingConnection.TrustServerCertificate;
+				SaveConnections();
+				PublishStatus($"Updated connection '{SelectedConnection.ServerAndInstance}'.");
 			}
 
 			IsEditing = false;
-			EditingConnection = null;
+			EditingConnection = new SqlConnectionViewModel();
+		}
+
+		private void LoadConnections()
+		{
+			var savedConnections = _connectionProfileStoreService.LoadConnections();
+			Connections = new ObservableCollection<SqlConnectionViewModel>(savedConnections);
+			SelectedConnection = Connections.Count > 0 ? Connections[0] : null;
+		}
+
+		private void SaveConnections()
+		{
+			_connectionProfileStoreService.SaveConnections(Connections);
 		}
 
 		private async Task ScriptObjectInternalAsync(SearchResultViewModel result)
 		{
-			if (SelectedConnection == null) return;
+			if (SelectedConnection == null)
+			{
+				PublishStatus("Select a connection before scripting an object.");
+				return;
+			}
 
 			try
 			{
 				var script = await _searchService.ScriptObjectAsync(SelectedConnection.ConnectionString, result);
+				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script?.Length ?? 0}");
 
 				var doc = new SqlDocumentViewModel(
-					result.ObjectName, // FilePath placeholder
+					result.ObjectName,
 					script,
 					$"{result.SchemaName}.{result.ObjectName}");
 
 				WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+				PublishStatus($"Scripted {result.SchemaName}.{result.ObjectName}.");
 			}
 			catch (Exception ex)
 			{
-				// Handle error
-				System.Diagnostics.Debug.WriteLine($"Scripting error: {ex.Message}");
+				System.Diagnostics.Debug.WriteLine($"Scripting error: {ex}");
+				PublishStatus($"Scripting failed: {ex.Message}");
 			}
 		}
 
 		[RelayCommand]
 		private async Task SearchAsync()
 		{
-			if (SelectedConnection == null || IsSearching) return;
+			if (SelectedConnection == null)
+			{
+				PublishStatus("Add and select a connection before searching.");
+				return;
+			}
+
+			if (string.IsNullOrWhiteSpace(SelectedConnection.ServerAndInstance))
+			{
+				PublishStatus("Selected connection is missing a server name.");
+				return;
+			}
 
 			IsSearching = true;
 			try
 			{
-				// Clear existing results
-				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(new System.Collections.Generic.List<SearchResultViewModel>()));
+				PublishStatus($"Searching server '{SelectedConnection.ServerAndInstance}'...");
+				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(new List<SearchResultViewModel>()));
 
 				var connectionString = SelectedConnection.ConnectionString;
 				var databases = await _searchService.GetDatabasesAsync(connectionString);
-
-				var allResults = new System.Collections.Generic.List<SearchResultViewModel>();
+				var allResults = new List<SearchResultViewModel>();
+				var failedDatabases = new List<string>();
 
 				foreach (var db in databases)
 				{
@@ -197,23 +246,42 @@ namespace SqlPhanos.ViewModels
 
 						allResults.AddRange(results);
 					}
-					catch (Exception)
+					catch (Exception ex)
 					{
-						// Log or handle individual database search failure
+						failedDatabases.Add(db);
+						System.Diagnostics.Debug.WriteLine($"Search error in database '{db}': {ex}");
 					}
 				}
 
 				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(allResults));
+
+				if (failedDatabases.Count > 0)
+				{
+					PublishStatus($"Found {allResults.Count} result(s). {failedDatabases.Count} database(s) failed.");
+				}
+				else if (allResults.Count == 0)
+				{
+					PublishStatus("Search completed. No matching objects found.");
+				}
+				else
+				{
+					PublishStatus($"Search completed. Found {allResults.Count} result(s).");
+				}
 			}
 			catch (Exception ex)
 			{
-				// Handle connection or general errors
-				System.Diagnostics.Debug.WriteLine($"Search error: {ex.Message}");
+				System.Diagnostics.Debug.WriteLine($"Search error: {ex}");
+				PublishStatus($"Search failed: {ex.Message}");
 			}
 			finally
 			{
 				IsSearching = false;
 			}
+		}
+
+		private static void PublishStatus(string status)
+		{
+			WeakReferenceMessenger.Default.Send(new StatusMessage(status));
 		}
 	}
 }

@@ -99,7 +99,6 @@ namespace SqlPhanos.Docking
         {
             ContextLocator = new Dictionary<string, Func<object?>>
             {
-                ["SqlDocumentViewModel"] = () => new SqlDocumentViewModel(),
                 ["SearchViewModel"] = () => _searchViewModel,
                 ["SearchResultsViewModel"] = () => _searchResultsViewModel,
                 ["ShellViewModel"] = () => _context
