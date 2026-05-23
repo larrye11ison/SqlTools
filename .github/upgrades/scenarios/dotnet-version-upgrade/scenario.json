@@ -1,0 +1,14 @@
+{
+  "scenarioId": "dotnet-version-upgrade",
+  "operationId": "26100ac1-b15e-4684-9e20-c671ce95ab0d",
+  "description": "Upgrade .NET projects to newer .NET versions",
+  "startTime": "2026-05-23T00:50:05.4317342Z",
+  "lastUpdateTime": "2026-05-23T00:53:11.7545722Z",
+  "stage": "Assessment",
+  "properties": {
+    "currentTask": "01-official-avalonia-editor-dependencies",
+    "task:01-official-avalonia-editor-dependencies:startedAt": "2026-05-23T00:53:11.7250245Z",
+    "UpgradeTargetFramework": "net10.0"
+  },
+  "folderPath": ""
+}
