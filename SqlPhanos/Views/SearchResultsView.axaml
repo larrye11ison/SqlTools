@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:SqlPhanos.ViewModels"
+             xmlns:dg="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="200"
              x:Class="SqlPhanos.Views.SearchResultsView"
              x:DataType="vm:SearchResultsViewModel">
@@ -33,6 +34,37 @@
         </Border>
 
         <!-- Results Grid -->
-        <TreeDataGrid Grid.Row="1" Source="{Binding Source}" />
+        <dg:DataGrid Grid.Row="1"
+                     ItemsSource="{Binding FilteredResults}"
+                     AutoGenerateColumns="False"
+                     CanUserResizeColumns="True"
+                     IsReadOnly="True"
+                     GridLinesVisibility="All"
+                     HeadersVisibility="Column"
+                     FrozenColumnCount="1">
+            <dg:DataGrid.Columns>
+                <dg:DataGridTemplateColumn Header="Script" Width="80">
+                    <dg:DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate DataType="vm:SearchResultViewModel">
+                            <Button Content="Script"
+                                    Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    IsEnabled="{Binding CanScriptObject}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Padding="4,2"
+                                    FontSize="11"/>
+                        </DataTemplate>
+                    </dg:DataGridTemplateColumn.CellTemplate>
+                </dg:DataGridTemplateColumn>
+                <dg:DataGridTextColumn Header="Server" Binding="{Binding ServerName}" Width="*" />
+                <dg:DataGridTextColumn Header="DB" Binding="{Binding DbName}" Width="*" />
+                <dg:DataGridTextColumn Header="Type" Binding="{Binding TypeDesc}" Width="*" />
+                <dg:DataGridTextColumn Header="Schema" Binding="{Binding SchemaName}" Width="*" />
+                <dg:DataGridTextColumn Header="Name" Binding="{Binding ObjectName}" Width="2*" />
+                <dg:DataGridTextColumn Header="Parent" Binding="{Binding ParentFqName}" Width="*" />
+                <dg:DataGridCheckBoxColumn Header="Encrypted" Binding="{Binding IsEncrypted}" Width="90" />
+            </dg:DataGrid.Columns>
+        </dg:DataGrid>
     </Grid>
 </UserControl>

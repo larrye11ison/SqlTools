@@ -4,8 +4,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Threading.Tasks;
-using Avalonia.Controls;
-using Avalonia.Controls.Models.TreeDataGrid;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -38,7 +36,7 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
     private string _filterType = "";
 
     [ObservableProperty]
-    private FlatTreeDataGridSource<SearchResultViewModel> _source;
+    private ObservableCollection<SearchResultViewModel> _filteredResults = new();
 
     public SearchResultsViewModel()
     {
@@ -71,50 +69,6 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
             _allResults.Add(item);
         }
         UpdateFilteredResults();
-    }
-
-    private FlatTreeDataGridSource<SearchResultViewModel> CreateSource(IEnumerable<SearchResultViewModel> items)
-    {
-        return new FlatTreeDataGridSource<SearchResultViewModel>(items)
-        {
-            Columns =
-            {
-                new TemplateColumn<SearchResultViewModel>(
-                    "Script",
-                    "ScriptCellTemplate",
-                    null,
-                    new GridLength(80)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "Server",
-                    x => x.ServerName,
-                    new GridLength(1, GridUnitType.Star)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "DB",
-                    x => x.DbName,
-                    new GridLength(1, GridUnitType.Star)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "Type",
-                    x => x.TypeDesc,
-                    new GridLength(1, GridUnitType.Star)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "Schema",
-                    x => x.SchemaName,
-                    new GridLength(1, GridUnitType.Star)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "Name",
-                    x => x.ObjectName,
-                    new GridLength(2, GridUnitType.Star)),
-                new TextColumn<SearchResultViewModel, string>(
-                    "Parent",
-                    x => x.ParentFqName,
-                    new GridLength(1, GridUnitType.Star)),
-                new CheckBoxColumn<SearchResultViewModel>(
-                    "Encrypted",
-                    x => x.IsEncrypted,
-                    null,
-                    new GridLength(90))
-            }
-        };
     }
 
     private bool Matches(string? value, string filter)
@@ -178,6 +132,6 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
             return true;
         });
 
-        Source = CreateSource(filtered.ToList());
+        FilteredResults = new ObservableCollection<SearchResultViewModel>(filtered);
     }
 }

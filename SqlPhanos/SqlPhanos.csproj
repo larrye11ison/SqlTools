@@ -17,42 +17,37 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Avalonia 11.x -->
-    <PackageReference Include="Avalonia" Version="11.3.10" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.10" />
-    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.10">
+    <!-- Avalonia -->
+    <PackageReference Include="Avalonia" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="12.0.3">
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     
     <!-- MVVM Toolkit -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     
     <!-- Data Access -->
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.1.6" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
     
     <!-- Docking -->
-    <PackageReference Include="Dock.Avalonia" Version="11.2.0" />
-    <PackageReference Include="Dock.Model.Avalonia" Version="11.2.0" />
-    <PackageReference Include="Dock.Model.Mvvm" Version="11.2.0" />
+    <PackageReference Include="Dock.Avalonia" Version="12.0.0.2" />
+    <PackageReference Include="Dock.Model.Avalonia" Version="12.0.0.2" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="12.0.0.2" />
     
-    <!-- TreeDataGrid -->
-    <PackageReference Include="Avalonia.Controls.TreeDataGrid" Version="11.0.10" />
-
     <!-- ReactiveUI -->
-    <PackageReference Include="Avalonia.ReactiveUI" Version="11.1.0" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="12.0.3" />
 
     <!-- Icons -->
-    <PackageReference Include="Projektanker.Icons.Avalonia" Version="9.4.0" />
-    <PackageReference Include="Projektanker.Icons.Avalonia.FontAwesome" Version="9.4.0" />
+    <PackageReference Include="Projektanker.Icons.Avalonia" Version="9.6.2" />
+    <PackageReference Include="Projektanker.Icons.Avalonia.FontAwesome" Version="9.6.2" />
 
     <!-- SMO -->
-    <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
+    <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="181.19.0" />
 
-    <!-- Text Editor - Avalonia 11 compatible version -->
-    <ProjectReference Include="..\external\AvaloniaEdit\src\AvaloniaEdit\AvaloniaEdit.csproj" />
-    <ProjectReference Include="..\external\AvaloniaEdit\src\AvaloniaEdit.TextMate\AvaloniaEdit.TextMate.csproj" />
   </ItemGroup>
 </Project>
