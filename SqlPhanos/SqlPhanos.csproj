@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SqlPhanos.CodeFormatting\SqlPhanos.CodeFormatting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Avalonia -->
     <PackageReference Include="Avalonia" Version="12.0.0" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
@@ -30,7 +34,7 @@
     
     <!-- Data Access -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
-    
+
     <!-- Docking -->
     <PackageReference Include="Dock.Avalonia" Version="12.0.0.2" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="12.0.0.2" />

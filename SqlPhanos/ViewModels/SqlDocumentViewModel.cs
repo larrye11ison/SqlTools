@@ -1,5 +1,6 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Mvvm.Controls;
+using SqlPhanos.CodeFormatting;
 
 namespace SqlPhanos.ViewModels;
 
@@ -8,11 +9,50 @@ namespace SqlPhanos.ViewModels;
 /// </summary>
 public partial class SqlDocumentViewModel : Document
 {
-    [ObservableProperty]
+    private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
+    private string _currentSqlText = "";
     private string _filePath = "";
+    private string _formattedSqlText = "";
+    private bool _isShowingFormatted;
+    private string _originalSqlText = "";
 
-    [ObservableProperty]
-    private string _sqlText = "";
+    public string CurrentSqlText
+    {
+        get => _currentSqlText;
+        private set => SetProperty(ref _currentSqlText, value);
+    }
+
+    public string FilePath
+    {
+        get => _filePath;
+        private set => SetProperty(ref _filePath, value);
+    }
+
+    public string FormattedSqlText
+    {
+        get => _formattedSqlText;
+        private set => SetProperty(ref _formattedSqlText, value);
+    }
+
+    public bool IsShowingFormatted
+    {
+        get => _isShowingFormatted;
+        private set
+        {
+            if (SetProperty(ref _isShowingFormatted, value))
+            {
+                OnPropertyChanged(nameof(DisplayModeLabel));
+            }
+        }
+    }
+
+    public string OriginalSqlText
+    {
+        get => _originalSqlText;
+        private set => SetProperty(ref _originalSqlText, value);
+    }
+
+    public string DisplayModeLabel => IsShowingFormatted ? "Formatted SQL" : "Original SQL";
 
     public string SyntaxScopeName => "source.sql";
 
@@ -24,7 +64,24 @@ public partial class SqlDocumentViewModel : Document
     public SqlDocumentViewModel(string filePath, string content, string title)
     {
         FilePath = filePath;
-        SqlText = content;
+        OriginalSqlText = content;
+        FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content);
+        CurrentSqlText = OriginalSqlText;
+        IsShowingFormatted = false;
         Title = title;
+    }
+
+    [RelayCommand]
+    private void ShowFormatted()
+    {
+        IsShowingFormatted = true;
+        CurrentSqlText = FormattedSqlText;
+    }
+
+    [RelayCommand]
+    private void ShowOriginal()
+    {
+        IsShowingFormatted = false;
+        CurrentSqlText = OriginalSqlText;
     }
 }

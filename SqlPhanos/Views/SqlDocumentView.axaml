@@ -17,18 +17,47 @@
         <Border DockPanel.Dock="Top" 
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="12,8">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-                <TextBlock Grid.Column="0"
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Row="0"
+                           Grid.Column="0"
                            Text="{Binding Title}" 
                            FontWeight="SemiBold"
                            FontSize="14"
                            VerticalAlignment="Center"/>
-                
-                <TextBlock Grid.Column="2"
+
+                <TextBlock Grid.Row="0"
+                           Grid.Column="2"
                            Text="{Binding FilePath}"
                            FontSize="11"
                            Opacity="0.7"
                            VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Row="1"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="3"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="View:"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"/>
+
+                    <Button Command="{Binding ShowOriginalCommand}"
+                            Content="Original"
+                            IsEnabled="{Binding IsShowingFormatted}" />
+
+                    <Button Command="{Binding ShowFormattedCommand}"
+                            Content="Formatted"
+                            IsEnabled="{Binding !IsShowingFormatted}" />
+
+                    <Border Background="#33000000"
+                            CornerRadius="4"
+                            Padding="8,2">
+                        <TextBlock Text="{Binding DisplayModeLabel}"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                </StackPanel>
             </Grid>
         </Border>
 

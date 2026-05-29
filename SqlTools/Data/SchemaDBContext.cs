@@ -117,7 +117,11 @@ namespace SqlTools.Data
                 DriAllConstraints = true,
                 SchemaQualify = true,
                 Indexes = true,
-                ScriptForCreateOrAlter = true
+                ScriptForCreateOrAlter = true,
+                IncludeIfNotExists = false,
+                TargetServerVersion = SMO.SqlServerVersion.Version150,
+                TargetDatabaseEngineType = SMO.DatabaseEngineType.Standalone,
+                EnforceScriptingOptions = true
             };
 
         /// <summary>
@@ -335,6 +339,7 @@ namespace SqlTools.Data
                     && line.StartsWith("SET QUOTED_IDENTIFIER", StringComparison.CurrentCultureIgnoreCase) == false
                     )
                 select line;
+
             foreach (var item in resultsICareAbout)
             {
                 sb.AppendFormat("{3}{1}{0}{1}{4}{1}{2}{1}", item, Environment.NewLine, "go", surroundWithStart, surroundWithEnd);

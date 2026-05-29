@@ -126,7 +126,11 @@ public class SqlSearchService
                 ScriptingOptions options = new ScriptingOptions
                 {
                     ScriptDrops = false,
-                    IncludeIfNotExists = true,
+                    IncludeIfNotExists = false,
+                    ScriptForCreateOrAlter = true,
+                    EnforceScriptingOptions = true,
+                    TargetServerVersion = SqlServerVersion.Version150,
+                    TargetDatabaseEngineType = DatabaseEngineType.Standalone,
                     ClusteredIndexes = true,
                     DriAll = true,
                     Indexes = true,

@@ -2,7 +2,7 @@
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
-using Microsoft.SqlServer.TransactSql.ScriptDom;
+//using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SqlTools.Shell;
 using System;
 using System.Collections.Generic;

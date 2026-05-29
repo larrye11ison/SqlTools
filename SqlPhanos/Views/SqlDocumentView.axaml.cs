@@ -3,7 +3,9 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
+using CommunityToolkit.Mvvm.ComponentModel;
 using SqlPhanos.ViewModels;
+using System.ComponentModel;
 using TextMateSharp.Grammars;
 using TextMateHost = AvaloniaEdit.TextMate.TextMate;
 
@@ -14,6 +16,7 @@ public partial class SqlDocumentView : UserControl
     private readonly RegistryOptions _registryOptions = new(ThemeName.DarkPlus);
     private TextEditor? _editor;
     private TextMateHost.Installation? _textMateInstallation;
+    private SqlDocumentViewModel? _trackedViewModel;
 
     public SqlDocumentView()
     {
@@ -55,18 +58,47 @@ public partial class SqlDocumentView : UserControl
             return;
         }
 
+        if (_trackedViewModel is not null)
+        {
+            _trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _trackedViewModel = null;
+        }
+
         if (DataContext is SqlDocumentViewModel viewModel)
         {
-            System.Diagnostics.Debug.WriteLine($"SqlDocumentView SyncFromViewModel DataContext={viewModel.GetType().Name} Title={viewModel.Title} SqlLength={viewModel.SqlText?.Length ?? 0}");
-            _editor.Document = new TextDocument(viewModel.SqlText ?? string.Empty);
+            _trackedViewModel = viewModel;
+            _trackedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            UpdateEditorDocument(viewModel);
             ApplyGrammar(viewModel.SyntaxScopeName);
         }
         else
         {
-            System.Diagnostics.Debug.WriteLine($"SqlDocumentView SyncFromViewModel DataContext={(DataContext?.GetType().Name ?? "null")}");
             _editor.Document = new TextDocument();
             ApplyGrammar("source.sql");
         }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not SqlDocumentViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(SqlDocumentViewModel.CurrentSqlText))
+        {
+            UpdateEditorDocument(viewModel);
+        }
+    }
+
+    private void UpdateEditorDocument(SqlDocumentViewModel viewModel)
+    {
+        if (_editor is null)
+        {
+            return;
+        }
+
+        _editor.Document = new TextDocument(viewModel.CurrentSqlText ?? string.Empty);
     }
 
     private void ApplyGrammar(string? scopeName)
@@ -97,6 +129,12 @@ public partial class SqlDocumentView : UserControl
 
     private void DisposeTextMate()
     {
+        if (_trackedViewModel is not null)
+        {
+            _trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _trackedViewModel = null;
+        }
+
         _textMateInstallation?.Dispose();
         _textMateInstallation = null;
     }
