@@ -157,18 +157,18 @@ public partial class ShellView : Window
     private void FocusSearchResultsPaneDefault()
     {
         var searchResultsView = this.GetVisualDescendants().OfType<SearchResultsView>().FirstOrDefault();
-        var grid = searchResultsView?.FindControl<DataGrid>("ResultsGrid");
-        if (grid is null)
+        var list = searchResultsView?.FindControl<ListBox>("ResultsList");
+        if (list is null)
         {
             return;
         }
 
-        if (grid.ItemsSource is System.Collections.IList { Count: > 0 })
+        if (list.ItemsSource is System.Collections.IList { Count: > 0 })
         {
-            grid.SelectedIndex = 0;
+            list.SelectedIndex = 0;
         }
 
-        grid.Focus();
+        list.Focus();
     }
 
     private void FocusDocumentsPaneDefault()

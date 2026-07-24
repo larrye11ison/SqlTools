@@ -12,11 +12,11 @@ public partial class SearchResultsView : UserControl
     {
         InitializeComponent();
 
-        // The DataGrid's own internal key handling (row navigation) marks Enter as
+        // The ListBox's own internal key handling (item navigation) marks Enter as
         // Handled before an ordinary bubble-routed handler on the same element would
         // ever see it, so this must observe already-handled events too.
-        var resultsGrid = this.FindControl<DataGrid>("ResultsGrid");
-        resultsGrid?.AddHandler(KeyDownEvent, ResultsGrid_KeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+        var resultsList = this.FindControl<ListBox>("ResultsList");
+        resultsList?.AddHandler(KeyDownEvent, ResultsList_KeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     private void InitializeComponent()
@@ -24,14 +24,14 @@ public partial class SearchResultsView : UserControl
         AvaloniaXamlLoader.Load(this);
     }
 
-    private void ResultsGrid_KeyDown(object? sender, KeyEventArgs e)
+    private void ResultsList_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter)
         {
             return;
         }
 
-        if (sender is not DataGrid grid || grid.SelectedItem is not SearchResultViewModel item)
+        if (sender is not ListBox list || list.SelectedItem is not SearchResultViewModel item)
         {
             return;
         }
@@ -45,9 +45,9 @@ public partial class SearchResultsView : UserControl
         e.Handled = true;
     }
 
-    private void ResultsGrid_DoubleTapped(object? sender, TappedEventArgs e)
+    private void ResultsList_DoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not DataGrid grid || grid.SelectedItem is not SearchResultViewModel item)
+        if (sender is not ListBox list || list.SelectedItem is not SearchResultViewModel item)
         {
             return;
         }

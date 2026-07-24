@@ -31,7 +31,7 @@ namespace SqlPhanos.Docking
             {
                 Id = "SearchDock",
                 Title = "Search",
-                Proportion = 0.25,
+                Proportion = 0.35,
                 ActiveDockable = searchViewModelDockable,
                 VisibleDockables = CreateList<IDockable>(searchViewModelDockable)
             };
@@ -40,7 +40,7 @@ namespace SqlPhanos.Docking
             {
                 Id = "SearchResultsDock",
                 Title = "Search Results",
-                Proportion = 0.25,
+                Proportion = 0.65,
                 ActiveDockable = searchResultsViewModelDockable,
                 VisibleDockables = CreateList<IDockable>(searchResultsViewModelDockable)
             };
@@ -55,16 +55,21 @@ namespace SqlPhanos.Docking
                 VisibleDockables = CreateList<IDockable>()
             };
 
-            var topLayout = new ProportionalDock
+            // Object Search stacked directly above Search Results in one narrow left-hand
+            // panel, rather than Search Results spanning the full window width along the
+            // bottom - the results list is meant to be read vertically, not scanned as wide
+            // columns.
+            var leftPanel = new ProportionalDock
             {
-                Id = "TopLayout",
-                Orientation = Orientation.Horizontal,
-                Proportion = double.NaN,
+                Id = "LeftPanel",
+                Title = "LeftPanel",
+                Orientation = Orientation.Vertical,
+                Proportion = 0.22,
                 VisibleDockables = CreateList<IDockable>
                 (
                     searchDock,
                     new ProportionalDockSplitter(),
-                    documentDock
+                    searchResultsDock
                 )
             };
 
@@ -73,13 +78,13 @@ namespace SqlPhanos.Docking
                 Id = "MainLayout",
                 Title = "MainLayout",
                 Proportion = double.NaN,
-                Orientation = Orientation.Vertical,
+                Orientation = Orientation.Horizontal,
                 ActiveDockable = null,
                 VisibleDockables = CreateList<IDockable>
                 (
-                    topLayout,
+                    leftPanel,
                     new ProportionalDockSplitter(),
-                    searchResultsDock
+                    documentDock
                 )
             };
 
