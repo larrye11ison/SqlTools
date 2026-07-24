@@ -23,6 +23,10 @@
         <KeyBinding Gesture="Ctrl+Tab" Command="{Binding ExecuteShortcutCommand}" CommandParameter="{x:Static enums:ApplicationShortcut.NextDocument}" />
         <KeyBinding Gesture="Ctrl+Shift+Tab" Command="{Binding ExecuteShortcutCommand}" CommandParameter="{x:Static enums:ApplicationShortcut.PreviousDocument}" />
     </Window.KeyBindings>
+    <!-- Ctrl+Shift+P is wired in code-behind (handledEventsToo) rather than as a declarative
+         KeyBinding here, since a descendant such as the AvaloniaEdit editor or the search
+         results DataGrid can mark the key event Handled before it would otherwise bubble up
+         to a Window-level KeyBinding. -->
 
     <DockPanel>
         <!-- Status bar at bottom -->

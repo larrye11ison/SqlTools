@@ -7,6 +7,7 @@ using SqlPhanos.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SqlPhanos.ViewModels
@@ -187,9 +188,17 @@ namespace SqlPhanos.ViewModels
 				return;
 			}
 
+			if (result.IsScripting)
+			{
+				return;
+			}
+
+			result.IsScripting = true;
+			result.ScriptingCts = new CancellationTokenSource();
+
 			try
 			{
-				var script = await _searchService.ScriptObjectAsync(SelectedConnection.ConnectionString, result);
+				var script = await _searchService.ScriptObjectAsync(SelectedConnection.ConnectionString, result, result.ScriptingCts.Token);
 				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script.Length}");
 
 				var doc = new SqlDocumentViewModel(
@@ -200,10 +209,20 @@ namespace SqlPhanos.ViewModels
 				WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
 				PublishStatus($"Scripted {result.SchemaName}.{result.ObjectName}.");
 			}
+			catch (OperationCanceledException)
+			{
+				PublishStatus($"Scripting cancelled for {result.SchemaName}.{result.ObjectName}.");
+			}
 			catch (Exception ex)
 			{
 				System.Diagnostics.Debug.WriteLine($"Scripting error: {ex}");
 				PublishStatus($"Scripting failed: {ex.Message}");
+			}
+			finally
+			{
+				result.IsScripting = false;
+				result.ScriptingCts?.Dispose();
+				result.ScriptingCts = null;
 			}
 		}
 

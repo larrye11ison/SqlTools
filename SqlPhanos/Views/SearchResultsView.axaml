@@ -8,19 +8,6 @@
              x:Class="SqlPhanos.Views.SearchResultsView"
              x:DataType="vm:SearchResultsViewModel">
     
-    <UserControl.Resources>
-        <DataTemplate x:Key="ScriptCellTemplate" DataType="vm:SearchResultViewModel">
-            <Button Content="Script" 
-                    Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                    CommandParameter="{Binding}"
-                    IsEnabled="{Binding CanScriptObject}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Padding="4,2"
-                    FontSize="11"/>
-        </DataTemplate>
-    </UserControl.Resources>
-
     <Grid RowDefinitions="Auto,*">
         <!-- Filter Controls -->
         <Border Grid.Row="0" Padding="4" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
@@ -34,26 +21,36 @@
         </Border>
 
         <!-- Results Grid -->
-        <dg:DataGrid Grid.Row="1"
+        <dg:DataGrid x:Name="ResultsGrid"
+                     Grid.Row="1"
                      ItemsSource="{Binding FilteredResults}"
                      AutoGenerateColumns="False"
                      CanUserResizeColumns="True"
                      IsReadOnly="True"
                      GridLinesVisibility="All"
                      HeadersVisibility="Column"
-                     FrozenColumnCount="1">
+                     FrozenColumnCount="1"
+                     DoubleTapped="ResultsGrid_DoubleTapped">
             <dg:DataGrid.Columns>
-                <dg:DataGridTemplateColumn Header="Script" Width="80">
+                <dg:DataGridTemplateColumn Header="Script" Width="150">
                     <dg:DataGridTemplateColumn.CellTemplate>
                         <DataTemplate DataType="vm:SearchResultViewModel">
-                            <Button Content="Script"
-                                    Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}"
-                                    IsEnabled="{Binding CanScriptObject}"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Padding="4,2"
-                                    FontSize="11"/>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="4"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <Button Content="{Binding ScriptButtonLabel}"
+                                        Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        IsEnabled="{Binding CanScriptObject}"
+                                        Padding="5,3"
+                                        FontSize="13"/>
+                                <Button Content="Cancel"
+                                        Command="{Binding CancelScriptingCommand}"
+                                        IsVisible="{Binding IsScripting}"
+                                        Padding="5,3"
+                                        FontSize="13"/>
+                            </StackPanel>
                         </DataTemplate>
                     </dg:DataGridTemplateColumn.CellTemplate>
                 </dg:DataGridTemplateColumn>

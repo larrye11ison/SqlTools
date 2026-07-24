@@ -28,6 +28,11 @@ public partial class SqlDocumentView : UserControl
         ActualThemeVariantChanged += (_, _) => ApplyTheme();
     }
 
+    public void FocusEditor()
+    {
+        _editor?.Focus();
+    }
+
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);

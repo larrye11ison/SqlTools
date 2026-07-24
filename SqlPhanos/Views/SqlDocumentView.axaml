@@ -42,10 +42,6 @@
                                VerticalAlignment="Center"
                                FontWeight="SemiBold"/>
 
-                    <Button Command="{Binding ShowScriptDomDefaultCommand}"
-                            Content="ScriptDom Default"
-                            IsEnabled="{Binding !IsShowingScriptDomDefault}" />
-
                     <Button Command="{Binding ShowOriginalCommand}"
                             Content="Original"
                             IsEnabled="{Binding !IsShowingOriginal}" />
