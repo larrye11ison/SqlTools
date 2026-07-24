@@ -115,6 +115,19 @@ public partial class SqlDocumentViewModel : Document
         CurrentSqlText = OriginalSqlText;
     }
 
+    [RelayCommand]
+    private void ToggleDisplayMode()
+    {
+        if (IsShowingOriginal)
+        {
+            ShowFormatted();
+        }
+        else
+        {
+            ShowOriginal();
+        }
+    }
+
     public void SetDependentObjects(IEnumerable<SearchResultViewModel> dependents)
     {
         _dependentObjects.Clear();

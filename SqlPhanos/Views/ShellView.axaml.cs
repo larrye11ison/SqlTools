@@ -59,13 +59,27 @@ public partial class ShellView : Window
 
         if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
         {
-            var activeDocument = this.GetVisualDescendants()
-                .OfType<SqlDocumentView>()
-                .FirstOrDefault(v => v.IsEffectivelyVisible);
+            GetActiveDocumentView()?.OpenFind();
+            e.Handled = true;
+            return;
+        }
 
-            activeDocument?.OpenFind();
+        if (e.Key == Key.M && e.KeyModifiers == KeyModifiers.Control)
+        {
+            if (GetActiveDocumentView()?.DataContext is SqlDocumentViewModel activeDocumentViewModel)
+            {
+                activeDocumentViewModel.ToggleDisplayModeCommand.Execute(null);
+            }
+
             e.Handled = true;
         }
+    }
+
+    private SqlDocumentView? GetActiveDocumentView()
+    {
+        return this.GetVisualDescendants()
+            .OfType<SqlDocumentView>()
+            .FirstOrDefault(v => v.IsEffectivelyVisible);
     }
 
     private void OnAnyGotFocus(object? sender, FocusChangedEventArgs e)
@@ -153,10 +167,6 @@ public partial class ShellView : Window
 
     private void FocusDocumentsPaneDefault()
     {
-        var activeDocument = this.GetVisualDescendants()
-            .OfType<SqlDocumentView>()
-            .FirstOrDefault(v => v.IsEffectivelyVisible);
-
-        activeDocument?.FocusEditor();
+        GetActiveDocumentView()?.FocusEditor();
     }
 }
