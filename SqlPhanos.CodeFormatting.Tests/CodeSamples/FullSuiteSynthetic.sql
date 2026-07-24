@@ -48,12 +48,15 @@ BEGIN
 							END
 							ELSE
 							BEGIN
-								INSERT INTO dbo.LogTable(
+								INSERT INTO dbo.LogTable
+								(
 									LogMsg,
 									LogDate
 								)
-								VALUES(
-									CONCAT(
+								VALUES
+								(
+									CONCAT
+									(
 										'Value: ', 
 										NULLIF(COALESCE(CAST(@InputID AS VARCHAR(10)), 'UNK'), '0')
 									),
@@ -158,7 +161,8 @@ BEGIN CATCH
 	SELECT
 		@OutputStatus = ERROR_MESSAGE(),
 		@CurrentStep = 'FAILED_AT_' + @CurrentStep;
-	INSERT INTO dbo.ErrorLog (
+	INSERT INTO dbo.ErrorLog 
+	(
 			ErrNum,
 			ErrSev,
 			ErrState,
@@ -167,7 +171,8 @@ BEGIN CATCH
 			ErrMsg,
 			StepContext
 	)
-	VALUES (
+	VALUES 
+	(
 			ERROR_NUMBER(),
 			ERROR_SEVERITY(),
 			ERROR_STATE(),
