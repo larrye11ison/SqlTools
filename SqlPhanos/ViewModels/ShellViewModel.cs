@@ -83,6 +83,17 @@ public partial class ShellViewModel : ObservableObject, IRecipient<OpenDocumentM
         WeakReferenceMessenger.Default.Send(new ApplicationShortcutMessage(shortcut, context));
     }
 
+    public void CloseActiveDocument()
+    {
+        if (Layout is null || Factory is null) return;
+
+        var documentDock = FindDocumentDock(Layout);
+        if (documentDock?.ActiveDockable is IDockable activeDockable)
+        {
+            Factory.CloseDockable(activeDockable);
+        }
+    }
+
     private void NavigateDocuments(bool next)
     {
         if (Layout is null || Factory is null) return;

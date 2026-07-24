@@ -14,7 +14,7 @@
 
     <DockPanel>
         <!-- Header bar -->
-        <Border DockPanel.Dock="Top" 
+        <Border DockPanel.Dock="Top"
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="12,8">
             <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
@@ -62,7 +62,7 @@
         </Border>
 
         <editor:TextEditor x:Name="Editor"
-                           FontFamily="Aporetic Serif"
+                           FontFamily="Aporetic Serif Mono"
                            FontSize="16"
                            IsReadOnly="True"
                            ShowLineNumbers="True"

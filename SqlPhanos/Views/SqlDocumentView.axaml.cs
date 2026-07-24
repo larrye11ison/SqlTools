@@ -3,6 +3,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
+using AvaloniaEdit.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SqlPhanos.ViewModels;
 using System.ComponentModel;
@@ -16,6 +17,7 @@ public partial class SqlDocumentView : UserControl
     private readonly RegistryOptions _registryOptions = new(ThemeName.DarkPlus);
     private TextEditor? _editor;
     private TextMateHost.Installation? _textMateInstallation;
+    private SearchPanel? _searchPanel;
     private SqlDocumentViewModel? _trackedViewModel;
 
     public SqlDocumentView()
@@ -33,6 +35,26 @@ public partial class SqlDocumentView : UserControl
         _editor?.Focus();
     }
 
+    public void OpenFind()
+    {
+        if (_searchPanel is null)
+        {
+            return;
+        }
+
+        // Reactivate (rather than Open again) when the panel is already open so that pressing
+        // Ctrl+F a second time refocuses the search box and re-selects its current text for
+        // immediate retyping, instead of being a no-op.
+        if (_searchPanel.IsClosed)
+        {
+            _searchPanel.Open();
+        }
+        else
+        {
+            _searchPanel.Reactivate();
+        }
+    }
+
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
@@ -41,7 +63,14 @@ public partial class SqlDocumentView : UserControl
 
     private void EnsureTextMateInstalled()
     {
-        if (_editor is null || _textMateInstallation is not null)
+        if (_editor is null)
+        {
+            return;
+        }
+
+        _searchPanel ??= SearchPanel.Install(_editor);
+
+        if (_textMateInstallation is not null)
         {
             return;
         }
@@ -142,5 +171,8 @@ public partial class SqlDocumentView : UserControl
 
         _textMateInstallation?.Dispose();
         _textMateInstallation = null;
+
+        _searchPanel?.Uninstall();
+        _searchPanel = null;
     }
 }
