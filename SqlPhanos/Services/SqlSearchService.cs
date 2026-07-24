@@ -182,6 +182,27 @@ public class SqlSearchService
                             sc = database.UserDefinedFunctions[result.ObjectName, result.SchemaName].Script(options);
                         break;
 
+                    case "SQL_TRIGGER":
+                        // DML triggers aren't in their own top-level SMO collection - they live
+                        // under whichever table or view they're attached to. A trigger's schema
+                        // always matches its parent object's schema (T-SQL requires this), so
+                        // result.SchemaName is reused for the parent lookup.
+                        if (database.Tables.Contains(result.ParentFqName, result.SchemaName) &&
+                            database.Tables[result.ParentFqName, result.SchemaName].Triggers.Contains(result.ObjectName))
+                        {
+                            sc = database.Tables[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Script(options);
+                        }
+                        else if (database.Views.Contains(result.ParentFqName, result.SchemaName) &&
+                                 database.Views[result.ParentFqName, result.SchemaName].Triggers.Contains(result.ObjectName))
+                        {
+                            sc = database.Views[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Script(options);
+                        }
+                        else
+                        {
+                            sb.AppendLine($"-- Trigger's parent object '{result.SchemaName}.{result.ParentFqName}' was not found among tables or views.");
+                        }
+                        break;
+
                     default:
                         sb.AppendLine($"-- Scripting not implemented for type: {result.TypeDesc}");
                         break;
