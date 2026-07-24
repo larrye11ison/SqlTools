@@ -7,6 +7,7 @@ namespace SqlPhanos.ViewModels;
 public partial class SearchResultViewModel : ObservableObject
 {
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FullyQualifiedName))]
     private string _dbName = "";
 
     [ObservableProperty]
@@ -19,12 +20,15 @@ public partial class SearchResultViewModel : ObservableObject
     private bool _isScripting;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FullyQualifiedName))]
     private string _objectName = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasParent))]
     private string _parentFqName = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FullyQualifiedName))]
     private string _schemaName = "";
 
     [ObservableProperty]
@@ -38,6 +42,10 @@ public partial class SearchResultViewModel : ObservableObject
     public string ScriptButtonLabel => IsScripting ? "Scripting..." : "Script";
 
     public bool CanScriptObject => !IsScripting;
+
+    public string FullyQualifiedName => $"{DbName}.{SchemaName}.{ObjectName}";
+
+    public bool HasParent => !string.IsNullOrWhiteSpace(ParentFqName);
 
     [RelayCommand(CanExecute = nameof(IsScripting))]
     private void CancelScripting()
