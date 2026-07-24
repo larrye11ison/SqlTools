@@ -8,7 +8,6 @@ public enum SqlDisplayMode
 {
     Original,
     Formatted,
-    ScriptDomDefault,
 }
 
 /// <summary>
@@ -22,7 +21,6 @@ public partial class SqlDocumentViewModel : Document
     private string _filePath = "";
     private string _formattedSqlText = "";
     private string _originalSqlText = "";
-    private string _scriptDomDefaultSqlText = "";
 
     public string CurrentSqlText
     {
@@ -42,12 +40,6 @@ public partial class SqlDocumentViewModel : Document
         private set => SetProperty(ref _formattedSqlText, value);
     }
 
-    public string ScriptDomDefaultSqlText
-    {
-        get => _scriptDomDefaultSqlText;
-        private set => SetProperty(ref _scriptDomDefaultSqlText, value);
-    }
-
     public string OriginalSqlText
     {
         get => _originalSqlText;
@@ -64,7 +56,6 @@ public partial class SqlDocumentViewModel : Document
                 OnPropertyChanged(nameof(DisplayModeLabel));
                 OnPropertyChanged(nameof(IsShowingOriginal));
                 OnPropertyChanged(nameof(IsShowingFormatted));
-                OnPropertyChanged(nameof(IsShowingScriptDomDefault));
             }
         }
     }
@@ -73,12 +64,9 @@ public partial class SqlDocumentViewModel : Document
 
     public bool IsShowingFormatted => DisplayMode == SqlDisplayMode.Formatted;
 
-    public bool IsShowingScriptDomDefault => DisplayMode == SqlDisplayMode.ScriptDomDefault;
-
     public string DisplayModeLabel => DisplayMode switch
     {
         SqlDisplayMode.Formatted => "Formatted SQL",
-        SqlDisplayMode.ScriptDomDefault => "ScriptDom Default SQL",
         _ => "Original SQL",
     };
 
@@ -94,7 +82,6 @@ public partial class SqlDocumentViewModel : Document
         FilePath = filePath;
         OriginalSqlText = content;
         FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content);
-        ScriptDomDefaultSqlText = _sqlCanonicalizationService.FormatWithScriptDomDefaults(content);
         CurrentSqlText = OriginalSqlText;
         DisplayMode = SqlDisplayMode.Original;
         Title = title;
@@ -112,12 +99,5 @@ public partial class SqlDocumentViewModel : Document
     {
         DisplayMode = SqlDisplayMode.Original;
         CurrentSqlText = OriginalSqlText;
-    }
-
-    [RelayCommand]
-    private void ShowScriptDomDefault()
-    {
-        DisplayMode = SqlDisplayMode.ScriptDomDefault;
-        CurrentSqlText = ScriptDomDefaultSqlText;
     }
 }

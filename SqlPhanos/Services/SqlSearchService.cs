@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Management.Common;
@@ -94,10 +95,12 @@ public class SqlSearchService
         return databases;
     }
 
-    public async Task<string> ScriptObjectAsync(string connectionString, SearchResultViewModel result)
+    public async Task<string> ScriptObjectAsync(string connectionString, SearchResultViewModel result, CancellationToken cancellationToken = default)
     {
         return await Task.Run(() =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var builder = new SqlConnectionStringBuilder(connectionString)
             {
                 InitialCatalog = result.DbName
@@ -120,6 +123,8 @@ public class SqlSearchService
 
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var database = server.Databases[result.DbName];
                 if (database == null) return "-- Database not found";
 
@@ -145,6 +150,8 @@ public class SqlSearchService
                 sb.AppendLine($"-- Server: {result.ServerName}");
                 sb.AppendLine($"-- Database: {result.DbName}");
                 sb.AppendLine("GO");
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 StringCollection? sc = null;
 
@@ -192,6 +199,10 @@ public class SqlSearchService
 
                 return sb.ToString();
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 return $"-- Error scripting object: {ex.Message}\r\n/*\r\n{ex}\r\n*/";
@@ -200,7 +211,7 @@ public class SqlSearchService
             {
                 serverConnection.Disconnect();
             }
-        });
+        }, cancellationToken);
     }
 
     public async Task<List<SearchResultViewModel>> SearchDatabaseAsync(

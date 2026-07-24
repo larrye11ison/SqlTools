@@ -16,6 +16,317 @@ public sealed class SqlCanonicalizationServiceTests
 	public SqlCanonicalizationServiceTests(ITestOutputHelper output) => _output = output;
 
 	[Fact]
+	public void ExecWithNamedParametersStartsOwnLineWithOneParamPerLine()
+	{
+		// EXEC/EXECUTE previously fell through to the default token handling entirely (no
+		// dedicated case), so it never started its own line and its parameters were never
+		// broken one-per-line like CREATE PROCEDURE parameter lists are.
+		var expected = """
+			SET @x = 1;
+
+			EXEC sp_Foo
+				@a = 1,
+				@b = 'x';
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ExecuteWithReturnCaptureAndSchemaQualifiedNameFormattedCorrectly()
+	{
+		var expected = """
+			SET @x = 1;
+
+			EXECUTE @ret = dbo.sp_Foo
+				@a = 1,
+				@b = 'x';
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ExecWithNoParametersStaysOnOneLine()
+	{
+		var expected = """
+			SET @x = 1;
+
+			EXEC sp_Foo;
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ExecuteDynamicSqlStringFormattedCorrectly()
+	{
+		var expected = """
+			SET @x = 1;
+
+			EXECUTE (@sql);
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ExecWithBareLiteralParametersGetsSpaceAndIndentedContinuationLines()
+	{
+		// Regression test: EXEC sp_proc 'literal', 'literal2' (no named @param = value pairs)
+		// was gluing the proc name directly to the first literal with no space at all
+		// ("sp_MSdroptemptable'#temp'"), and the continuation parameters after the first
+		// comma were not indented one level deeper like the named-parameter form is.
+		var sql = "EXEC sp_MSdroptemptable '#CurrentLastTwelve',\n'two',\n3,\n'more'";
+		var expected = """
+			EXEC sp_MSdroptemptable '#CurrentLastTwelve',
+				'two',
+				3,
+				'more';
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void InsertIntoSelectWithoutColumnListDoesNotCorruptLaterParentheses()
+	{
+		// Regression test: INSERT INTO tbl SELECT ... (no explicit "(col1, col2)" column list)
+		// left the pendingInsertColumnList flag stuck true, since it is normally only cleared
+		// by the "(" of that column list or by VALUES. With no column list and no VALUES, the
+		// flag stayed true until the *next* parenthesis anywhere in the SELECT - e.g. a
+		// CAST(...) or ROW_NUMBER() call - which then got mistaken for the insert's own column
+		// list and mangled (broken across lines it should never have broken across, sometimes
+		// bleeding into unrelated statements much further down the same batch).
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt";
+		var expected = """
+			INSERT INTO #dateRangeLastTwelve
+			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
+			FROM OperationalDatamart.dbo.D_Time dt;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void InsertIntoSelectWithRowNumberOverDoesNotBreakEmptyParens()
+	{
+		// Same pendingInsertColumnList leak as InsertIntoSelectWithoutColumnListDoesNotCorruptLaterParentheses,
+		// but for ROW_NUMBER()'s empty argument list specifically: the stray "(" of ROW_NUMBER()
+		// was mistaken for the insert column list opener, splitting "()" across four lines.
+		var sql = "INSERT INTO #dilDates\nSELECT\n\t[l].[LoanID],\n\tROW_NUMBER() OVER (PARTITION BY l.LoanID ORDER BY [lmd].[DeedInLieuDate] DESC) AS RowNum\nFROM LossMitDatesBase lmd";
+		var expected = """
+			INSERT INTO #dilDates
+			SELECT
+				[l].[LoanID],
+				ROW_NUMBER()
+				OVER (
+					PARTITION BY l.LoanID
+					ORDER BY [lmd].[DeedInLieuDate] DESC
+				) AS RowNum
+			FROM LossMitDatesBase lmd;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateTableAfterPrecedingInsertIntoSelectKeepsDatatypeAndPrimaryKeyGlued()
+	{
+		// Same pendingInsertColumnList leak: a stuck flag from an earlier INSERT INTO ... SELECT
+		// (no column list) survived across statement boundaries and corrupted an unrelated,
+		// later CREATE TABLE's VARCHAR(10) column-length parens.
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt\n\nCREATE TABLE #closedLoans (\n\t[LoanID] VARCHAR(10) PRIMARY KEY CLUSTERED,\n\t[LoanClosedDate] DATETIME\n)";
+		var expected = """
+			INSERT INTO #dateRangeLastTwelve
+			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
+			FROM OperationalDatamart.dbo.D_Time dt;
+
+			CREATE TABLE #closedLoans (
+				[LoanID] VARCHAR(10) PRIMARY KEY CLUSTERED,
+				[LoanClosedDate] DATETIME
+			);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void OuterApplyAliasStaysOnClosingParenLineAfterPrecedingInsertIntoSelect()
+	{
+		// Same pendingInsertColumnList leak: the "fmt" alias immediately following the closing
+		// paren of an OUTER APPLY subquery was dropped to its own line instead of staying glued
+		// to ")", once a preceding INSERT INTO ... SELECT (no column list) left the flag stuck.
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt\n\nSELECT\n\tfb.LoanID\nFROM Core.dbo.LossMitigationForbearanceWorkflow fb\nOUTER APPLY (\n\tSELECT 1 AS X\n) fmt";
+		var expected = """
+			INSERT INTO #dateRangeLastTwelve
+			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
+			FROM OperationalDatamart.dbo.D_Time dt;
+
+			SELECT fb.LoanID
+			FROM Core.dbo.LossMitigationForbearanceWorkflow fb
+			OUTER APPLY
+			(
+				SELECT
+					1 AS X
+			) fmt;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableAddConstraintPrimaryKeySingleColumnStaysCompactOnThirdLine()
+	{
+		// ALTER TABLE / ADD CONSTRAINT [name] / PRIMARY KEY CLUSTERED (...) always break onto
+		// three separate lines regardless of column count, but the column list itself only
+		// expands across multiple lines when there is more than one column.
+		var sql = "ALTER TABLE #currentLastSix ADD CONSTRAINT [pk_currentLastSix_LoanID] PRIMARY KEY CLUSTERED (LoanID)";
+		var expected = """
+			ALTER TABLE #currentLastSix
+			ADD CONSTRAINT [pk_currentLastSix_LoanID]
+			PRIMARY KEY CLUSTERED (LoanID);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableAddConstraintPrimaryKeyMultiColumnExpandsColumnList()
+	{
+		var sql = "ALTER TABLE #delinquencies ADD CONSTRAINT [pk_delinquencies_LoanID_DATA_DATE] PRIMARY KEY CLUSTERED ( LoanID, DATA_DATE)";
+		var expected = """
+			ALTER TABLE #delinquencies
+			ADD CONSTRAINT [pk_delinquencies_LoanID_DATA_DATE]
+			PRIMARY KEY CLUSTERED (
+				LoanID,
+				DATA_DATE
+			);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableAddPrimaryKeyWithoutConstraintNameKeepsAddAndPrimaryOnSameLine()
+	{
+		// With no CONSTRAINT [name] clause, ADD and PRIMARY KEY CLUSTERED share a line - the
+		// same way ADD and CONSTRAINT do when a name is given - since there is no separate
+		// constraint-name clause to justify a break between them.
+		var sql = "ALTER TABLE #curMba ADD PRIMARY KEY CLUSTERED ([LoanID])";
+		var expected = """
+			ALTER TABLE #curMba
+			ADD PRIMARY KEY CLUSTERED ([LoanID]);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableAddPrimaryKeyWithoutConstraintNameMultiColumnExpandsColumnList()
+	{
+		var sql = "ALTER TABLE #prevDeferBal ADD PRIMARY KEY CLUSTERED ( LoanID, RowId, SubCode)";
+		var expected = """
+			ALTER TABLE #prevDeferBal
+			ADD PRIMARY KEY CLUSTERED (
+				LoanID,
+				RowId,
+				SubCode
+			);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateOrAlterProcedureKeepsAlterOnTheCreateLine()
+	{
+		// Regression test: adding dedicated ALTER TABLE handling must not affect the common
+		// "CREATE OR ALTER PROCEDURE ..." idiom, where ALTER continues the CREATE line rather
+		// than starting a standalone ALTER statement.
+		var sql = "CREATE OR ALTER PROCEDURE dbo.MyProc\nAS\nBEGIN\n\tSELECT 1\nEND";
+		var expected = """
+			CREATE OR ALTER PROCEDURE dbo.MyProc
+			AS
+			BEGIN
+				SELECT 1;
+
+			END;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void RowNumberOverWithTrailingAliasBreaksOverOntoOwnLine()
+	{
+		var sql = "SELECT\n\tad.LoanID,\n\tROW_NUMBER() OVER (PARTITION BY ad.LoanID ORDER BY ad.DATA_DATE DESC) AS RowNum\nFROM Miser.dbo.ASSET_DETAIL_DAILY ad";
+		var expected = """
+			SELECT
+				ad.LoanID,
+				ROW_NUMBER()
+				OVER (
+					PARTITION BY ad.LoanID
+					ORDER BY ad.DATA_DATE DESC
+				) AS RowNum
+			FROM Miser.dbo.ASSET_DETAIL_DAILY ad;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void MissingSemicolonIsAddedWithNoTrailingBlankLineAtEndOfDocument()
+	{
+		var input = "SELECT 1";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("SELECT\r\n\t1;", formatted);
+	}
+
+	[Fact]
+	public void TwoStatementsGetExactlyOneBlankLineBetweenThemAndNoneAfterTheLastOne()
+	{
+		var input = "SELECT 1\nSELECT 2";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("SELECT\r\n\t1;\r\n\r\nSELECT\r\n\t2;", formatted);
+	}
+
+	[Fact]
+	public void AlreadyTerminatedStatementIsNotDoubleTerminated()
+	{
+		var input = "SELECT 1;";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("SELECT 1;", formatted);
+	}
+
+	[Fact]
+	public void CompoundIfStatementGetsSemicolonAndBlankLineAfterEndIncludingNestedBody()
+	{
+		var input = "IF @x = 1\nBEGIN\n\tSET @y = 2\nEND\nSELECT 1";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("IF @x = 1\r\nBEGIN\r\n\tSET @y = 2;\r\n\r\nEND;\r\n\r\nSELECT\r\n\t1;", formatted);
+	}
+
+	[Fact]
+	public void SubqueryInsideWhereClauseIsNotIndependentlyTerminated()
+	{
+		// Only the outer statement's closing paren gets the terminator; the subquery SELECT
+		// is a QuerySpecification, not a TSqlStatement, so the AST-based boundary collector
+		// never sees it as a candidate statement boundary.
+		var input = "SELECT 1 WHERE x IN (SELECT y FROM t)";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("SELECT\r\n\t1\r\nWHERE x IN\r\n\t(\r\n\t\tSELECT y\r\n\t\tFROM t\r\n\t);", formatted);
+	}
+
+	[Fact]
+	public void GoSeparatedBatchesEachGetTerminatedWithoutDoublingBlankLines()
+	{
+		var input = "SELECT 1\nGO\nSELECT 2";
+		var formatted = service.FormatForDisplay(input);
+		Assert.Equal("SELECT 1;\r\n\r\nGO\r\nSELECT\r\n\t2;", formatted);
+	}
+
+	[Fact]
 	public void ShortCastAndBuiltInFunctionsStayOnOneLineAndAreCapitalized()
 	{
 		// CAST(...) - and other built-in functions like DATEADD - must stay on one line when
@@ -46,7 +357,7 @@ public sealed class SqlCanonicalizationServiceTests
 				CAST(
 					dt.SomeVeryLongColumnNameThatPushesThisOverTheLineLengthThreshold AS VARCHAR(200)
 				) AS Foo
-			FROM t
+			FROM t;
 			""";
 
 		RunFactTest(expected);
@@ -62,6 +373,7 @@ public sealed class SqlCanonicalizationServiceTests
 			CREATE OR ALTER PROCEDURE [dbo].[MyProc]
 			AS
 			SELECT 1;
+
 			SELECT 2;
 			""";
 
@@ -77,7 +389,7 @@ public sealed class SqlCanonicalizationServiceTests
 			SET
 				INGOMAR_MARK_DESC = 'Paid',
 				INGOMAR_MARK = 4
-			WHERE ISNULL(PrincipalBal, 0) = 0
+			WHERE ISNULL(PrincipalBal, 0) = 0;
 			""";
 
 		RunFactTest(expected);
@@ -102,7 +414,7 @@ public sealed class SqlCanonicalizationServiceTests
 				(
 					SELECT INVESTOR_ID
 					FROM SNMLT_INVESTOR(NOLOCK)
-				)
+				);
 			""";
 
 		RunFactTest(expected);
@@ -149,15 +461,18 @@ public sealed class SqlCanonicalizationServiceTests
 		// syntax instead of "expr AS [alias]". Regression coverage: ORDER BY inside an OVER(...)
 		// window clause was being treated as the enclosing statement's own ORDER BY - closing the
 		// select column list early and losing a level of indentation relative to PARTITION BY.
+		// ROW_NUMBER() and OVER always break onto separate lines at the same indent, with the
+		// window spec's parens forced to expand regardless of length.
 		var expected = """
 			SELECT
 				[lfb].[LoanID],
-				[RowId] = ROW_NUMBER() OVER (
+				[RowId] = ROW_NUMBER()
+				OVER (
 					PARTITION BY [lfb].[LoanID],
 					[lfb].[SubCode]
 					ORDER BY [lfb].[DataDate] DESC
 				)
-			FROM Miser.dbo.LoanFeeBalancesHistory lfb
+			FROM Miser.dbo.LoanFeeBalancesHistory lfb;
 			""";
 
 		RunFactTest(expected);
@@ -178,7 +493,7 @@ public sealed class SqlCanonicalizationServiceTests
 					WHEN 'Vacant' THEN 'Vacant'
 					ELSE 'Unknown'
 				END AS OccupancyStatus
-			FROM Asset_Detail ad
+			FROM Asset_Detail ad;
 			""";
 
 		RunFactTest(expected);
@@ -192,11 +507,16 @@ public sealed class SqlCanonicalizationServiceTests
 		// entirely, gluing tokens together with zero separation (e.g. "OFFRETURN",
 		// "@intErrErrorHandler:", ")WITH").
 		var expected = """
-			SET NOCOUNT OFF
-			RETURN @intErr
-			ErrorHandler:
-			SET NOCOUNT OFF
-			RAISERROR ('%s. Error Number = %d', 11, 1, @chvErrMessage, @intErr) WITH SETERROR
+			SET NOCOUNT OFF;
+
+			RETURN @intErr;
+
+			ErrorHandler:;
+
+			SET NOCOUNT OFF;
+
+			RAISERROR ('%s. Error Number = %d', 11, 1, @chvErrMessage, @intErr) WITH SETERROR;
+
 			GO
 			""";
 
@@ -257,7 +577,7 @@ public sealed class SqlCanonicalizationServiceTests
 				b
 			FROM foo f
 			INNER JOIN bar b ON f.id = b.foo_id
-				AND f.status = 'active'
+				AND f.status = 'active';
 			""";
 
 		RunFactTest(expected);
@@ -292,7 +612,8 @@ public sealed class SqlCanonicalizationServiceTests
 			IF(1 = 1)
 			BEGIN
 				PRINT 'hi';
-			END
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -319,7 +640,8 @@ public sealed class SqlCanonicalizationServiceTests
 			AS
 			BEGIN
 				SELECT 1;
-			END
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -335,7 +657,8 @@ public sealed class SqlCanonicalizationServiceTests
 			AS
 			BEGIN
 				SELECT 1;
-			END
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -352,7 +675,8 @@ public sealed class SqlCanonicalizationServiceTests
 			AS
 			BEGIN
 				SELECT 1;
-			END
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -363,7 +687,9 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		var expected = """
 			DECLARE @CurrentStep NVARCHAR(50) = 'INIT';
+
 			DECLARE @CalculatedThreshold DECIMAL(18,4);
+
 			DECLARE @Bastard int = 420,
 			    @Fart as VARCHAR(69);
 			""";
@@ -469,11 +795,14 @@ public sealed class SqlCanonicalizationServiceTests
 			IF(1 = 1)
 			BEGIN
 				PRINT 'hi';
-			END
+
+			END;
+
 			ELSE
 			BEGIN
 				PRINT 'bye';
-			END
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -494,7 +823,7 @@ public sealed class SqlCanonicalizationServiceTests
 				'a',
 				'b',
 				'c'
-			)
+			);
 			""";
 
 		RunFactTest(expected);
@@ -514,7 +843,7 @@ public sealed class SqlCanonicalizationServiceTests
 				a.One,
 				a.Two,
 				a.Three
-			FROM dbo.Blerg a
+			FROM dbo.Blerg a;
 			""";
 		RunFactTest(expected);
 	}
@@ -527,7 +856,7 @@ public sealed class SqlCanonicalizationServiceTests
 			FROM Employees e
 			LEFT JOIN Departments d ON e.DepartmentID = d.DepartmentID
 				AND d.DepartmentName = 'Sales'
-			WHERE e.EmployeeID IN (1, 2, 3)
+			WHERE e.EmployeeID IN (1, 2, 3);
 			""";
 
 		RunFactTest(sql);
@@ -542,7 +871,7 @@ public sealed class SqlCanonicalizationServiceTests
 			FROM Employees e
 			LEFT OUTER JOIN Departments d ON e.DepartmentID = d.DepartmentID
 				AND d.DepartmentName = 'Sales'
-			WHERE e.EmployeeID IN (1, 2, 3)
+			WHERE e.EmployeeID IN (1, 2, 3);
 			""";
 
 		RunFactTest(sql);
@@ -558,7 +887,7 @@ public sealed class SqlCanonicalizationServiceTests
 			FROM Employees e
 			JOIN Departments d ON e.DepartmentID = d.DepartmentID
 				AND d.DepartmentName = 'Sales'
-			WHERE e.EmployeeID IN (1, 2, 3)
+			WHERE e.EmployeeID IN (1, 2, 3);
 			""";
 
 		RunFactTest(sql);
@@ -611,15 +940,28 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void LongerNestedFunctionsAreBrokenApart()
 	{
-		var expected = """
+		// The input is deliberately left without a trailing semicolon: ShouldKeepSelectInline
+		// treats any comma-free top-level SELECT projection immediately followed by a semicolon
+		// as eligible to stay on one line (a pre-existing, narrower-than-intended heuristic meant
+		// for trivial single-value selects like "SELECT 1;"), so an already-terminated version of
+		// this multi-line nested-function expression would not round-trip through this same
+		// method - it would collapse onto one line instead of staying broken apart.
+		var sql = """
 			SELECT
 				COALESCE(
 					ISNULL(CAST(a AS VARCHAR(10)), 'N/A'), FORMAT(a.DateSold, 'yyyy-MM-dd'),
 					MAX(CAST(a AS VARCHAR(20)))
 				)
 			""";
+		var expected = """
+			SELECT
+				COALESCE(
+					ISNULL(CAST(a AS VARCHAR(10)), 'N/A'), FORMAT(a.DateSold, 'yyyy-MM-dd'),
+					MAX(CAST(a AS VARCHAR(20)))
+				);
+			""";
 
-		RunFactTest(expected);
+		RunFactTest(sql, expected);
 	}
 
 	[Fact]
@@ -630,7 +972,7 @@ public sealed class SqlCanonicalizationServiceTests
 				a,
 				b,
 				c
-			FROM foo
+			FROM foo;
 			""";
 		RunFactTest(expected);
 	}
@@ -643,7 +985,7 @@ public sealed class SqlCanonicalizationServiceTests
 				1
 			FROM sometable
 			WHERE a = 69
-				and b = 420
+				and b = 420;
 			""";
 		RunFactTest(expected);
 	}
@@ -651,8 +993,10 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void NestedFunkHellWithAlias()
 	{
-		// read sql text from file "SELECT.sql" in CodeSamples dir
-		string expected = """
+		// See the comment on LongerNestedFunctionsAreBrokenApart: the input is deliberately left
+		// without a trailing semicolon so ShouldKeepSelectInline's "single comma-free projection
+		// immediately followed by ;" heuristic doesn't collapse this back onto one line.
+		string sql = """
 			SELECT
 				COALESCE(
 					NULLIF(
@@ -666,8 +1010,22 @@ public sealed class SqlCanonicalizationServiceTests
 					UPPER(LEFT(ISNULL(f.FooName, 'UNKNOWN_FOO'), 3)), 'DEFAULT_FALLBACK'
 				) AS ComplexStringExpression
 			""";
+		string expected = """
+			SELECT
+				COALESCE(
+					NULLIF(
+						RTRIM(
+							LTRIM(
+								ISNULL(UPPER(FORMAT(b.UpdatedDate, 'yyyy-MM-dd HH:mm:ss')), 'NOT_MODIFIED')
+							)
+						),
+						''
+					),
+					UPPER(LEFT(ISNULL(f.FooName, 'UNKNOWN_FOO'), 3)), 'DEFAULT_FALLBACK'
+				) AS ComplexStringExpression;
+			""";
 
-		RunFactTest(expected);
+		RunFactTest(sql, expected);
 	}
 
 	[Fact]
@@ -697,7 +1055,7 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		var expected = """
 			SELECT @foo = 3
-			FROM foo
+			FROM foo;
 			""";
 
 		RunFactTest(expected);
@@ -708,7 +1066,7 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		var expected = """
 			SELECT a
-			FROM foo
+			FROM foo;
 			""";
 
 		RunFactTest(expected);
@@ -721,9 +1079,11 @@ public sealed class SqlCanonicalizationServiceTests
 			IF @intErr <> 0
 			BEGIN
 				SET @chvErrMessage = 'ERROR: Stored Procedure up_AIFu_SecondaryUpdateAssetDetail ' +
-					'failed at: Update. Correct the problem and Rerun.'
-				GOTO ErrorHandler
-			END
+					'failed at: Update. Correct the problem and Rerun.';
+
+				GOTO ErrorHandler;
+
+			END;
 			""";
 
 		RunFactTest(expected);
@@ -754,7 +1114,7 @@ public sealed class SqlCanonicalizationServiceTests
 			SELECT
 				1
 			FROM sometable
-			WHERE a = 3
+			WHERE a = 3;
 			""";
 
 		RunFactTest(expected);
@@ -863,6 +1223,16 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		var normalizedExpected = NormalizeExpectedForComparison(expected);
 		var sql = NormalizeWhitespace(expected);
+		var formatted = service.FormatForDisplay(sql);
+		WriteStringDiff(normalizedExpected, formatted);
+		Assert.Equal(normalizedExpected, formatted);
+		return formatted;
+	}
+
+	private string RunFactTest(string sqlInput, string expected)
+	{
+		var normalizedExpected = NormalizeExpectedForComparison(expected);
+		var sql = NormalizeWhitespace(sqlInput);
 		var formatted = service.FormatForDisplay(sql);
 		WriteStringDiff(normalizedExpected, formatted);
 		Assert.Equal(normalizedExpected, formatted);
