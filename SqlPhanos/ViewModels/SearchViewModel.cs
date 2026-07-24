@@ -208,6 +208,18 @@ namespace SqlPhanos.ViewModels
 
 				WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
 				PublishStatus($"Scripted {result.SchemaName}.{result.ObjectName}.");
+
+				try
+				{
+					var dependents = await _searchService.GetDependentObjectsAsync(SelectedConnection.ConnectionString, result);
+					doc.SetDependentObjects(dependents);
+				}
+				catch (Exception ex)
+				{
+					// Dependent-object discovery is best-effort - a failure here must not
+					// invalidate the script that already opened successfully.
+					System.Diagnostics.Debug.WriteLine($"Dependent object lookup failed: {ex}");
+				}
 			}
 			catch (OperationCanceledException)
 			{
