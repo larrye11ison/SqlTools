@@ -61,6 +61,39 @@
             </Grid>
         </Border>
 
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasDependentObjects}"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,6">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Dependent objects:"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           FontSize="12"/>
+                <ItemsControl ItemsSource="{Binding DependentObjects}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:SearchResultViewModel">
+                            <Button Command="{Binding ((vm:SqlDocumentViewModel)DataContext).ScriptDependentObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Margin="0,0,6,0"
+                                    Padding="6,2"
+                                    FontSize="12"
+                                    ToolTip.Tip="Script this dependent object into a new tab">
+                                <TextBlock Text="{Binding ObjectName}"/>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
         <editor:TextEditor x:Name="Editor"
                            FontFamily="Aporetic Serif Mono"
                            FontSize="16"

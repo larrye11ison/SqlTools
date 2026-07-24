@@ -1,6 +1,10 @@
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
+using SqlPhanos.Messages;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace SqlPhanos.ViewModels;
 
@@ -20,6 +24,7 @@ public partial class SqlDocumentViewModel : Document
     private SqlDisplayMode _displayMode = SqlDisplayMode.Original;
     private string _filePath = "";
     private string _formattedSqlText = "";
+    private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
 
     public string CurrentSqlText
@@ -45,6 +50,15 @@ public partial class SqlDocumentViewModel : Document
         get => _originalSqlText;
         private set => SetProperty(ref _originalSqlText, value);
     }
+
+    /// <summary>
+    /// Objects that depend on the one scripted into this document (e.g. the triggers on a
+    /// table). Populated asynchronously after the document opens, since discovering them
+    /// requires an extra round trip to the server.
+    /// </summary>
+    public ObservableCollection<SearchResultViewModel> DependentObjects => _dependentObjects;
+
+    public bool HasDependentObjects => DependentObjects.Count > 0;
 
     public SqlDisplayMode DisplayMode
     {
@@ -99,5 +113,27 @@ public partial class SqlDocumentViewModel : Document
     {
         DisplayMode = SqlDisplayMode.Original;
         CurrentSqlText = OriginalSqlText;
+    }
+
+    public void SetDependentObjects(IEnumerable<SearchResultViewModel> dependents)
+    {
+        _dependentObjects.Clear();
+        foreach (var dependent in dependents)
+        {
+            _dependentObjects.Add(dependent);
+        }
+
+        OnPropertyChanged(nameof(HasDependentObjects));
+    }
+
+    [RelayCommand]
+    private void ScriptDependentObject(SearchResultViewModel? dependent)
+    {
+        if (dependent is null)
+        {
+            return;
+        }
+
+        WeakReferenceMessenger.Default.Send(new ScriptObjectRequestMessage(dependent));
     }
 }

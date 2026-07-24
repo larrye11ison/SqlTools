@@ -77,6 +77,66 @@ public class SqlSearchService
                 OR c.MatchingColumnCount > 0
                 );";
 
+    // Triggers are the only dependent-object relationship in sys.objects that hangs off a
+    // simple parent_object_id, so tables and views are the only parent types handled today.
+    // A trigger's own schema always matches its parent's (T-SQL requires this).
+    private const string DependentTriggersQuery = @"
+        SELECT @@SERVERNAME AS server_name
+            ,cast(db_name() AS SYSNAME) AS db_name
+            ,ao.type_desc
+            ,sch.NAME AS schema_name
+            ,ao.NAME AS object_name
+            ,aop.NAME AS parent_object_name
+            ,isnull(cast(objectproperty(ao.object_id, 'IsEncrypted') AS BIT), 0) AS is_encrypted
+        FROM sys.all_objects ao
+        INNER JOIN sys.all_objects aop ON aop.object_id = ao.parent_object_id
+        LEFT OUTER JOIN sys.schemas sch ON sch.schema_id = ao.schema_id
+        WHERE ao.type_desc = 'SQL_TRIGGER'
+            AND ao.parent_object_id = OBJECT_ID(@parentFqName______);";
+
+    public async Task<List<SearchResultViewModel>> GetDependentObjectsAsync(string connectionString, SearchResultViewModel forObject)
+    {
+        var results = new List<SearchResultViewModel>();
+        if (forObject.TypeDesc != "USER_TABLE" && forObject.TypeDesc != "VIEW")
+        {
+            return results;
+        }
+
+        var builder = new SqlConnectionStringBuilder(connectionString)
+        {
+            InitialCatalog = forObject.DbName
+        };
+
+        using (var connection = new SqlConnection(builder.ConnectionString))
+        {
+            await connection.OpenAsync();
+            using (var command = new SqlCommand(DependentTriggersQuery, connection))
+            {
+                var quotedName = $"[{forObject.SchemaName.Replace("]", "]]")}].[{forObject.ObjectName.Replace("]", "]]")}]";
+                command.Parameters.AddWithValue("@parentFqName______", quotedName);
+
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        results.Add(new SearchResultViewModel
+                        {
+                            ServerName = reader["server_name"].ToString() ?? "",
+                            DbName = reader["db_name"].ToString() ?? "",
+                            TypeDesc = reader["type_desc"].ToString() ?? "",
+                            SchemaName = reader["schema_name"].ToString() ?? "",
+                            ObjectName = reader["object_name"].ToString() ?? "",
+                            ParentFqName = reader["parent_object_name"] != DBNull.Value ? reader["parent_object_name"].ToString() ?? "" : "",
+                            IsEncrypted = (bool)reader["is_encrypted"]
+                        });
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+
     public async Task<List<string>> GetDatabasesAsync(string connectionString)
     {
         var databases = new List<string>();
