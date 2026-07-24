@@ -6,6 +6,7 @@ using Dock.Model.Core;
 using SqlPhanos.Docking;
 using SqlPhanos.Enums;
 using SqlPhanos.Messages;
+using SqlPhanos.Services;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -23,6 +24,8 @@ public partial class ShellViewModel : ObservableObject, IRecipient<OpenDocumentM
 
     [ObservableProperty]
     private string _statusMessage = "Ready. Add a connection to start searching.";
+
+    public string AppTitle => $"SqlPhanos v{AppVersionService.GetDisplayVersion()} - SQL Server Object Search";
 
     public ShellViewModel()
     {

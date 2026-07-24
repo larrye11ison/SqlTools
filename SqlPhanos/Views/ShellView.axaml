@@ -10,7 +10,7 @@
         x:Class="SqlPhanos.Views.ShellView"
         x:DataType="vm:ShellViewModel"
         Icon="/Assets/sqlphanos.ico"
-        Title="SqlPhanos - SQL Server Object Search"
+        Title="{Binding AppTitle}"
         Width="1200"
         Height="800">
 

@@ -5,7 +5,8 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+
     <!-- Application Icon Configuration -->
     <!-- This icon will be used for: executable file, taskbar, alt-tab, start menu -->
     <ApplicationIcon>Assets\sqlphanos.ico</ApplicationIcon>
@@ -17,6 +18,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SqlPhanos.CodeFormatting\SqlPhanos.CodeFormatting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Derives the assembly/informational version from git tags + commit height at build
+         time (no manual version bumping). See MinVerTagPrefix below for the tag format. -->
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
