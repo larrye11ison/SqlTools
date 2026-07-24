@@ -51,7 +51,11 @@ jobs:
         run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
 
       - name: Publish
-        run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --no-build --output "${{ env.ARTIFACT_PATH }}"
+        run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --runtime win-x64 --self-contained false --output "${{ env.ARTIFACT_PATH }}"
+
+      - name: Strip native debug symbols
+        shell: pwsh
+        run: Get-ChildItem -Path "${{ env.ARTIFACT_PATH }}" -Filter *.pdb -Recurse | Remove-Item -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
