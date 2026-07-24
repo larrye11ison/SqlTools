@@ -916,6 +916,37 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void InsertValuesListGivesVariablesAndPlainExpressionsTheSameIndent()
+	{
+		// Regression test: '@'-prefixed variable tokens at the start of a line always added a
+		// flat "+1 level" baseline on top of whatever indent the VALUES tuple's own parenthesis
+		// scope already contributed, double-counting that level and over-indenting variables one
+		// tab deeper than plain expressions (function calls, NULL, literals) in the exact same
+		// list. Mirrors a real-world INSERT with a mix of @variables and expressions.
+		var sql = "INSERT INTO INTERACTION\n(\n\tCORE_ASSET_ID,\n\tOUTCOME_ID,\n\tINTERACTION_SUBJECT,\n\tDATE_TIME_MODIFIED,\n\tPERSON_MODIFYING_ID\n)\nVALUES\n(\n\t@CORE_ASSET_ID,\n\t@OUTCOME_ID,\n\tCOALESCE(@INTERACTION_SUBJECT, ''),\n\tGETDATE(),\n\t@PERSON_MODIFYING_ID\n)";
+		var expected = """
+			INSERT INTO INTERACTION
+			(
+				CORE_ASSET_ID,
+				OUTCOME_ID,
+				INTERACTION_SUBJECT,
+				DATE_TIME_MODIFIED,
+				PERSON_MODIFYING_ID
+			)
+			VALUES
+			(
+				@CORE_ASSET_ID,
+				@OUTCOME_ID,
+				COALESCE(@INTERACTION_SUBJECT, ''),
+				GETDATE(),
+				@PERSON_MODIFYING_ID
+			);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void InsertWithSelectFormattedCorrectly()
 	{
 		var expected = """
