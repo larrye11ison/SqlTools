@@ -1,11 +1,11 @@
 using CommunityToolkit.Mvvm.Messaging.Messages;
-using SqlPhanos.ViewModels;
+using Dock.Model.Mvvm.Controls;
 
 namespace SqlPhanos.Messages;
 
-public class OpenDocumentMessage : ValueChangedMessage<SqlDocumentViewModel>
+public class OpenDocumentMessage : ValueChangedMessage<Document>
 {
-    public OpenDocumentMessage(SqlDocumentViewModel document) : base(document)
+    public OpenDocumentMessage(Document document) : base(document)
     {
     }
 }

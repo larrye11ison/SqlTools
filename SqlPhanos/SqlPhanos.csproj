@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SqlPhanos.CodeFormatting\SqlPhanos.CodeFormatting.csproj" />
+    <ProjectReference Include="..\SqlPhanos.QueryXLerator\SqlPhanos.QueryXLerator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

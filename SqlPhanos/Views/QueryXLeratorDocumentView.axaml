@@ -1,0 +1,91 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             xmlns:editor="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+             x:Class="SqlPhanos.Views.QueryXLeratorDocumentView"
+             x:DataType="vm:QueryXLeratorDocumentViewModel">
+
+    <Design.DataContext>
+        <vm:QueryXLeratorDocumentViewModel/>
+    </Design.DataContext>
+
+    <Grid>
+        <DockPanel IsEnabled="{Binding !ShowOverwriteConfirmation}">
+            <!-- Header / toolbar -->
+            <Border DockPanel.Dock="Top"
+                    Background="{DynamicResource SystemAccentColor}"
+                    Padding="12,8">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding Title}"
+                               FontWeight="SemiBold"
+                               FontSize="14"/>
+
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="Output:"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,6,0"/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding OutputPath}"/>
+                        <Button Grid.Column="2"
+                                Content="Browse..."
+                                Click="OnBrowseClick"
+                                Margin="6,0,0,0"/>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Table style:" VerticalAlignment="Center"/>
+                        <ComboBox ItemsSource="{Binding TableStyleNames}"
+                                  SelectedItem="{Binding SelectedTableStyleName}"
+                                  MinWidth="150"/>
+                        <CheckBox Content="Include empty result sets"
+                                  IsChecked="{Binding IncludeEmptyResultSets}"
+                                  VerticalAlignment="Center"/>
+                        <Button Content="Execute"
+                                Command="{Binding ExecuteCommand}"
+                                IsEnabled="{Binding CanRunQuery}"/>
+                        <Button Content="Cancel"
+                                Command="{Binding CancelCommand}"
+                                IsVisible="{Binding IsRunning}"/>
+                        <TextBlock Text="{Binding Status}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding DurationText}" VerticalAlignment="Center" Opacity="0.8"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <editor:TextEditor x:Name="Editor"
+                               FontSize="16"
+                               ShowLineNumbers="True"
+                               WordWrap="False"
+                               HorizontalScrollBarVisibility="Auto"
+                               VerticalScrollBarVisibility="Auto"/>
+        </DockPanel>
+
+        <!-- Overwrite confirmation overlay -->
+        <Grid IsVisible="{Binding ShowOverwriteConfirmation}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Overwrite file?" FontWeight="Bold" FontSize="16"/>
+                    <TextBlock Text="{Binding OutputPath, StringFormat='The output file already exists:\n{0}'}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                        <Button Content="Overwrite" Command="{Binding ConfirmOverwriteCommand}" Classes="accent"/>
+                        <Button Content="Cancel" Command="{Binding CancelOverwriteCommand}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+
+</UserControl>
