@@ -282,6 +282,12 @@ public class SqlSearchService
                     sb.AppendLine("-- Object not found in SMO collections.");
                 }
 
+                if (result.IsEncrypted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AppendDecryptionAttempt(sb, builder.ConnectionString, result);
+                }
+
                 return sb.ToString();
             }
             catch (OperationCanceledException)
@@ -297,6 +303,38 @@ public class SqlSearchService
                 serverConnection.Disconnect();
             }
         }, cancellationToken);
+    }
+
+    // SQL Server never exposes an encrypted object's definition through sys.sql_modules or
+    // SMO, to anyone, regardless of permissions - that's the whole point of WITH ENCRYPTION.
+    // EncryptedObjectDecryptionService's best-effort recovery is the only way to get the text
+    // back, and only for object types where reconstructing a valid ALTER needs nothing beyond
+    // the schema-qualified name (see its class comment for the full scope/caveats).
+    private static void AppendDecryptionAttempt(StringBuilder sb, string connectionString, SearchResultViewModel result)
+    {
+        sb.AppendLine();
+
+        if (!EncryptedObjectDecryptionService.IsSupportedType(result.TypeDesc))
+        {
+            sb.AppendLine($"-- Object is encrypted (WITH ENCRYPTION). Automatic decryption is only implemented for");
+            sb.AppendLine($"-- stored procedures and views, not '{result.TypeDesc}'.");
+            return;
+        }
+
+        var decrypted = EncryptedObjectDecryptionService.TryDecrypt(connectionString, result.TypeDesc, result.SchemaName, result.ObjectName);
+        if (decrypted is null)
+        {
+            sb.AppendLine("-- Object is encrypted (WITH ENCRYPTION). Automatic decryption was attempted but failed -");
+            sb.AppendLine("-- this requires sysadmin rights, the Dedicated Admin Connection (DAC) enabled on the");
+            sb.AppendLine("-- server, and ALTER permission on the object.");
+            return;
+        }
+
+        sb.AppendLine("-- The definition below was recovered from a WITH ENCRYPTION object using a known-plaintext");
+        sb.AppendLine("-- XOR recovery technique (see EncryptedObjectDecryptionService). This is a best-effort,");
+        sb.AppendLine("-- unofficial recovery, not a supported SQL Server feature - verify it carefully before use.");
+        sb.AppendLine(decrypted);
+        sb.AppendLine("GO");
     }
 
     public async Task<List<SearchResultViewModel>> SearchDatabaseAsync(
