@@ -53,6 +53,13 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
             _allResults.Add(item);
         }
         UpdateFilteredResults();
+
+        // Only on an actual search completing - not on every filter-box edit, which also
+        // calls UpdateFilteredResults() and would otherwise steal focus while typing.
+        if (FilteredResults.Count > 0)
+        {
+            WeakReferenceMessenger.Default.Send(new FocusFirstSearchResultMessage());
+        }
     }
 
     partial void OnFilterDbChanged(string value) => UpdateFilteredResults();

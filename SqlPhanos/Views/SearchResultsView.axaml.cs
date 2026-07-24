@@ -2,11 +2,13 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using CommunityToolkit.Mvvm.Messaging;
+using SqlPhanos.Messages;
 using SqlPhanos.ViewModels;
 
 namespace SqlPhanos.Views;
 
-public partial class SearchResultsView : UserControl
+public partial class SearchResultsView : UserControl, IRecipient<FocusFirstSearchResultMessage>
 {
     public SearchResultsView()
     {
@@ -17,6 +19,24 @@ public partial class SearchResultsView : UserControl
         // ever see it, so this must observe already-handled events too.
         var resultsList = this.FindControl<ListBox>("ResultsList");
         resultsList?.AddHandler(KeyDownEvent, ResultsList_KeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+
+        WeakReferenceMessenger.Default.Register<FocusFirstSearchResultMessage>(this);
+    }
+
+    public void Receive(FocusFirstSearchResultMessage message)
+    {
+        var list = this.FindControl<ListBox>("ResultsList");
+        if (list is null)
+        {
+            return;
+        }
+
+        if (list.ItemsSource is System.Collections.IList { Count: > 0 })
+        {
+            list.SelectedIndex = 0;
+        }
+
+        list.Focus();
     }
 
     private void InitializeComponent()
