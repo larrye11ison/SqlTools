@@ -139,7 +139,10 @@ public class SqlSearchService
                     ClusteredIndexes = true,
                     DriAll = true,
                     Indexes = true,
-                    Triggers = true,
+                    // Scripting a table must produce only the table, not every trigger attached
+                    // to it - triggers are scripted independently as their own first-class
+                    // object type (see the SQL_TRIGGER case below).
+                    Triggers = false,
                     ScriptSchema = true,
                     ScriptData = false
                 };
