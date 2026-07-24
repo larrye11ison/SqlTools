@@ -1103,8 +1103,16 @@ public sealed class SqlCanonicalizationService
 								break;
 							}
 
+							var previousSpacingIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+							var previousSpacingType = previousSpacingIndex >= 0 ? tokens[previousSpacingIndex].TokenType : TSqlTokenType.None;
+							var isBuiltInFunctionOpenParen = nextType == TSqlTokenType.LeftParenthesis &&
+								IsBuiltInFunctionCall(tokens, previousSpacingIndex);
+							var isAfterBuiltInFunctionOpenParen = result.Length > 0 && result[^1] == '(' &&
+								previousSpacingType == TSqlTokenType.LeftParenthesis &&
+								IsBuiltInFunctionCall(tokens, PreviousNonWhitespaceIndex(tokens, previousSpacingIndex - 1));
 							if (result.Length > 0 && result[^1] != ' ' && result[^1] != '\t' &&
-								nextType is not TSqlTokenType.Comma and not TSqlTokenType.RightParenthesis and not TSqlTokenType.Semicolon)
+								nextType is not TSqlTokenType.Comma and not TSqlTokenType.RightParenthesis and not TSqlTokenType.Semicolon &&
+								!isBuiltInFunctionOpenParen && !isAfterBuiltInFunctionOpenParen)
 							{
 								result.Append(' ');
 							}
@@ -1298,7 +1306,7 @@ public sealed class SqlCanonicalizationService
 							AppendIndent(result, indentLevel + extraIndent);
 							lineStart = false;
 						}
-						result.Append(token.Text);
+						result.Append(IsBuiltInFunctionCall(tokens, i) ? token.Text.ToUpperInvariant() : token.Text);
 						previousWasStatementEnd = false;
 						break;
 
@@ -1927,9 +1935,42 @@ public sealed class SqlCanonicalizationService
 		return false;
 	}
 
-	private static bool IsBuiltInFunction(TSqlTokenType tokenType)
+	private static readonly HashSet<string> BuiltInFunctionNames = new(StringComparer.OrdinalIgnoreCase)
 	{
-		return tokenType is TSqlTokenType.Coalesce or TSqlTokenType.NullIf;
+		"CAST", "TRY_CAST", "CONVERT", "TRY_CONVERT", "PARSE", "TRY_PARSE",
+		"DATEADD", "DATEDIFF", "DATEDIFF_BIG", "DATEPART", "DATENAME", "DATETRUNC",
+		"GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "EOMONTH",
+		"ISNULL", "COALESCE", "NULLIF", "IIF", "CHECKSUM", "NEWID",
+		"LEN", "SUBSTRING", "STUFF", "CHARINDEX", "PATINDEX", "REPLACE",
+		"LTRIM", "RTRIM", "UPPER", "LOWER", "CONCAT", "CONCAT_WS", "STR", "SPACE", "REPLICATE", "REVERSE", "QUOTENAME", "PARSENAME", "FORMAT",
+		"ROUND", "CEILING", "FLOOR", "ABS", "SIGN", "POWER", "SQRT",
+		"SUM", "COUNT", "COUNT_BIG", "AVG", "MIN", "MAX", "STRING_AGG",
+		"ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "LAG", "LEAD",
+		"OBJECT_ID", "COL_NAME", "SCHEMA_NAME",
+		"ERROR_MESSAGE", "ERROR_NUMBER", "ERROR_SEVERITY", "ERROR_STATE", "ERROR_LINE", "ERROR_PROCEDURE",
+		"OPENJSON", "JSON_VALUE", "JSON_QUERY",
+	};
+
+	private static bool IsBuiltInFunctionCall(IList<TSqlParserToken> tokens, int identifierIndex)
+	{
+		if (identifierIndex < 0 || identifierIndex >= tokens.Count)
+		{
+			return false;
+		}
+
+		var token = tokens[identifierIndex];
+		if (token.TokenType is not (TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier))
+		{
+			return false;
+		}
+
+		if (!BuiltInFunctionNames.Contains(token.Text))
+		{
+			return false;
+		}
+
+		var nextIndex = NextNonWhitespaceIndex(tokens, identifierIndex + 1);
+		return nextIndex < tokens.Count && tokens[nextIndex].TokenType == TSqlTokenType.LeftParenthesis;
 	}
 
 	private static bool IsClauseBoundaryToken(TSqlTokenType tokenType)
@@ -2035,7 +2076,9 @@ public sealed class SqlCanonicalizationService
 			TSqlTokenType.Values or
 			TSqlTokenType.Table or
 			TSqlTokenType.Execute or
-			TSqlTokenType.Exec => true,
+			TSqlTokenType.Exec or
+			TSqlTokenType.Coalesce or
+			TSqlTokenType.NullIf => true,
 			_ => false
 		};
 	}

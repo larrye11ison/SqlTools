@@ -16,6 +16,43 @@ public sealed class SqlCanonicalizationServiceTests
 	public SqlCanonicalizationServiceTests(ITestOutputHelper output) => _output = output;
 
 	[Fact]
+	public void ShortCastAndBuiltInFunctionsStayOnOneLineAndAreCapitalized()
+	{
+		// CAST(...) - and other built-in functions like DATEADD - must stay on one line when
+		// short, and must be capitalized regardless of how they were typed in the source, since
+		// they tokenize as plain identifiers (not reserved keywords) and were previously left
+		// exactly as typed, including being broken across multiple lines if the source happened
+		// to put the argument list on its own line.
+		var expected = """
+			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
+			FROM OperationalDatamart.dbo.D_Time dt
+			WHERE dt.date_id > DATEADD(month, - 12, @lastOfPreviousMonth)
+				AND dt.date_id <= @lastOfPreviousMonth
+				AND dt.IsMonthEnd = 1;
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void LongCastExpandsFollowingEstablishedParenthesisPattern()
+	{
+		// The one exception to "CAST always stays on one line": when the expression exceeds the
+		// 75-character threshold, it follows the same vertical-expansion pattern as any other
+		// function call (e.g. FormatForDisplay_Expands_Parentheses_Vertically).
+		var expected = """
+			SELECT
+				a,
+				CAST(
+					dt.SomeVeryLongColumnNameThatPushesThisOverTheLineLengthThreshold AS VARCHAR(200)
+				) AS Foo
+			FROM t
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
 	public void CreateProcedureWithBracketedNameAndNoBeginEndBody()
 	{
 		// CREATE PROCEDURE with a bracketed multi-part name and no parameters, whose body is a
