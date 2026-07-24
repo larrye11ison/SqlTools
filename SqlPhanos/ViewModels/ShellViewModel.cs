@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Controls;
 using Dock.Model.Core;
+using Dock.Model.Mvvm.Controls;
 using SqlPhanos.Docking;
 using SqlPhanos.Enums;
 using SqlPhanos.Messages;
@@ -52,7 +53,7 @@ public partial class ShellViewModel : ObservableObject, IRecipient<OpenDocumentM
         StatusMessage = message.Value;
     }
 
-    private void AddDocument(SqlDocumentViewModel document)
+    private void AddDocument(Document document)
     {
         if (Layout is null || Factory is null) return;
 

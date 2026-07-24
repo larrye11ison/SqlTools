@@ -46,9 +46,11 @@ namespace SqlPhanos.ViewModels
 		[NotifyPropertyChangedFor(nameof(CanDeleteSelectedConnection))]
 		[NotifyPropertyChangedFor(nameof(CanEditSelectedConnection))]
 		[NotifyPropertyChangedFor(nameof(CanSearch))]
+		[NotifyPropertyChangedFor(nameof(CanOpenQuery))]
 		[NotifyCanExecuteChangedFor(nameof(DeleteConnectionCommand))]
 		[NotifyCanExecuteChangedFor(nameof(EditConnectionCommand))]
 		[NotifyCanExecuteChangedFor(nameof(SearchCommand))]
+		[NotifyCanExecuteChangedFor(nameof(OpenQueryXLeratorCommand))]
 		private SqlConnectionViewModel? _selectedConnection;
 
 		[ObservableProperty]
@@ -59,6 +61,8 @@ namespace SqlPhanos.ViewModels
 		public bool CanEditSelectedConnection => SelectedConnection is not null;
 
 		public bool CanSearch => !IsSearching && SelectedConnection is not null;
+
+		public bool CanOpenQuery => SelectedConnection is not null;
 
 		public SearchViewModel()
 		{
@@ -135,6 +139,16 @@ namespace SqlPhanos.ViewModels
 			_isAddingNew = false;
 			IsEditing = true;
 			PublishStatus($"Editing connection '{SelectedConnection.ServerAndInstance}'.");
+		}
+
+		[RelayCommand(CanExecute = nameof(CanOpenQuery))]
+		private void OpenQueryXLerator()
+		{
+			if (SelectedConnection == null) return;
+
+			var doc = new QueryXLeratorDocumentViewModel(SelectedConnection.ConnectionString, SelectedConnection.ServerAndInstance);
+			WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+			PublishStatus($"Opened new query session against '{SelectedConnection.ServerAndInstance}'.");
 		}
 
 		[RelayCommand]

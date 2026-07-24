@@ -12,24 +12,32 @@
 		<DockPanel IsEnabled="{Binding !ShowDeleteConfirmation}">
 			<!-- Connection Bar -->
 			<Border DockPanel.Dock="Top" Padding="5" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
-				<Grid ColumnDefinitions="*,Auto,Auto,Auto">
-					<ComboBox Grid.Column="0"
-                              ItemsSource="{Binding Connections}"
-                              SelectedItem="{Binding SelectedConnection}"
-                              HorizontalAlignment="Stretch"
-                              Margin="0,0,5,0"
-                              PlaceholderText="Add a connection to begin" >
-						<ComboBox.ItemTemplate>
-							<DataTemplate>
-								<TextBlock Text="{Binding ServerAndInstance}" />
-							</DataTemplate>
-						</ComboBox.ItemTemplate>
-					</ComboBox>
+				<StackPanel Spacing="4">
+					<Grid ColumnDefinitions="*,Auto,Auto,Auto">
+						<ComboBox Grid.Column="0"
+                                  ItemsSource="{Binding Connections}"
+                                  SelectedItem="{Binding SelectedConnection}"
+                                  HorizontalAlignment="Stretch"
+                                  Margin="0,0,5,0"
+                                  PlaceholderText="Add a connection to begin" >
+							<ComboBox.ItemTemplate>
+								<DataTemplate>
+									<TextBlock Text="{Binding ServerAndInstance}" />
+								</DataTemplate>
+							</ComboBox.ItemTemplate>
+						</ComboBox>
 
-					<Button Grid.Column="1" Command="{Binding AddConnectionCommand}" Content="+" ToolTip.Tip="Add Connection" Margin="2,0" />
-					<Button Grid.Column="2" Command="{Binding EditConnectionCommand}" Content="Edit" ToolTip.Tip="Edit Connection" Margin="2,0" IsEnabled="{Binding CanEditSelectedConnection}" />
-					<Button Grid.Column="3" Command="{Binding DeleteConnectionCommand}" Content="Delete" ToolTip.Tip="Delete Connection" Margin="2,0" IsEnabled="{Binding CanDeleteSelectedConnection}" />
-				</Grid>
+						<Button Grid.Column="1" Command="{Binding AddConnectionCommand}" Content="+" ToolTip.Tip="Add Connection" Margin="2,0" />
+						<Button Grid.Column="2" Command="{Binding EditConnectionCommand}" Content="Edit" ToolTip.Tip="Edit Connection" Margin="2,0" IsEnabled="{Binding CanEditSelectedConnection}" />
+						<Button Grid.Column="3" Command="{Binding DeleteConnectionCommand}" Content="Delete" ToolTip.Tip="Delete Connection" Margin="2,0" IsEnabled="{Binding CanDeleteSelectedConnection}" />
+					</Grid>
+
+					<Button Command="{Binding OpenQueryXLeratorCommand}"
+                            Content="New Query..."
+                            ToolTip.Tip="Open an ad-hoc query session against the selected connection, exportable to XLSX"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="{Binding CanOpenQuery}"/>
+				</StackPanel>
 			</Border>
 
 			<!-- Connection Editor (Overlay/Expandable) -->
