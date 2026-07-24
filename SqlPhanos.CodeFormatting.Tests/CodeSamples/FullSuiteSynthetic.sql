@@ -207,7 +207,7 @@ BEGIN
 			ERROR_PROCEDURE(),
 			ERROR_LINE(),
 			ERROR_MESSAGE(),
-				@CurrentStep
+			@CurrentStep
 		);
 
 		THROW;

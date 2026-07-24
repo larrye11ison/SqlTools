@@ -1515,8 +1515,17 @@ public sealed class SqlCanonicalizationService
 
 							if (lineStart)
 							{
+								// The flat "+1" baseline stands in for a parameter list that
+								// manages its own indent without ever pushing a ParenthesisScope
+								// (EXEC params, CREATE-statement params). inCreateStatementParams
+								// and inValuesList both DO already represent "one level of list
+								// nesting" on their own - inValuesList in particular pushes its
+								// own scope for the VALUES tuple - so adding the active expanded
+								// parenthesis depth on top of the flat baseline for those double-
+								// counts that same level and over-indents relative to every other
+								// (non-'@') token in the same list.
 								var parameterIndent = indentLevel + 1;
-								if (!inCreateStatementParams)
+								if (!inCreateStatementParams && !inValuesList)
 								{
 									parameterIndent += GetActiveExpandedParenthesisDepth(parenthesisStack);
 								}
