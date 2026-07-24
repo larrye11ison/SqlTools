@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Messaging;
 using SqlPhanos.Messages;
 using SqlPhanos.ViewModels;
@@ -25,18 +26,27 @@ public partial class SearchResultsView : UserControl, IRecipient<FocusFirstSearc
 
     public void Receive(FocusFirstSearchResultMessage message)
     {
-        var list = this.FindControl<ListBox>("ResultsList");
-        if (list is null)
+        // This runs synchronously inside the same call stack as the FilteredResults
+        // reassignment that triggered it, before the ListBox's ItemsSource binding and
+        // layout have necessarily caught up - selecting/focusing immediately here was
+        // landing focus on the ListBox before it had a live SelectedItem, so Enter had
+        // nothing to act on. Deferring to a dispatcher pass after Loaded/Render priority
+        // work (Input is lower than both) guarantees the binding has settled first.
+        Dispatcher.UIThread.Post(() =>
         {
-            return;
-        }
+            var list = this.FindControl<ListBox>("ResultsList");
+            if (list is null)
+            {
+                return;
+            }
 
-        if (list.ItemsSource is System.Collections.IList { Count: > 0 })
-        {
-            list.SelectedIndex = 0;
-        }
+            if (list.ItemsSource is System.Collections.IList { Count: > 0 })
+            {
+                list.SelectedIndex = 0;
+            }
 
-        list.Focus();
+            list.Focus();
+        }, DispatcherPriority.Input);
     }
 
     private void InitializeComponent()
