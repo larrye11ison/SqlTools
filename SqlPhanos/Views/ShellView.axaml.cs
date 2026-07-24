@@ -201,18 +201,7 @@ public partial class ShellView : Window
     private void FocusSearchResultsPaneDefault()
     {
         var searchResultsView = this.GetVisualDescendants().OfType<SearchResultsView>().FirstOrDefault();
-        var list = searchResultsView?.FindControl<ListBox>("ResultsList");
-        if (list is null)
-        {
-            return;
-        }
-
-        if (list.ItemsSource is System.Collections.IList { Count: > 0 })
-        {
-            list.SelectedIndex = 0;
-        }
-
-        list.Focus();
+        searchResultsView?.FocusFirstResult();
     }
 
     private void FocusDocumentsPaneDefault()
