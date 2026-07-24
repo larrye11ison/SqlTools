@@ -72,25 +72,28 @@
                            VerticalAlignment="Center"
                            FontWeight="SemiBold"
                            FontSize="12"/>
-                <ItemsControl ItemsSource="{Binding DependentObjects}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:SearchResultViewModel">
-                            <Button Command="{Binding ((vm:SqlDocumentViewModel)DataContext).ScriptDependentObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}"
-                                    Margin="0,0,6,0"
-                                    Padding="6,2"
-                                    FontSize="12"
-                                    ToolTip.Tip="Script this dependent object into a new tab">
-                                <TextBlock Text="{Binding ObjectName}"/>
-                            </Button>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <!-- A single scrollable row rather than a WrapPanel, so a wide list of
+                     dependent objects never wraps onto a second (vertical-looking) line. -->
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding DependentObjects}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="6"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:SearchResultViewModel">
+                                <Button Command="{Binding ((vm:SqlDocumentViewModel)DataContext).ScriptDependentObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="6,2"
+                                        FontSize="12"
+                                        ToolTip.Tip="Script this dependent object into a new tab">
+                                    <TextBlock Text="{Binding ObjectName}"/>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </StackPanel>
         </Border>
 
