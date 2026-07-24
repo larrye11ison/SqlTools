@@ -29,6 +29,32 @@
          to a Window-level KeyBinding. -->
 
     <DockPanel>
+        <!-- Main menu bar. No actively-maintained, stable ribbon control targeting this
+             Avalonia version was found (the available options are pre-1.0/beta packages or a
+             commercial suite), so this uses a classic Windows-style menu instead. -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Settings..." Click="OnSettingsClick"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Click="OnExitClick"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Toggle _Formatting" InputGesture="Ctrl+M" Click="OnToggleFormattingClick"/>
+                <MenuItem Header="_Find in Document" InputGesture="Ctrl+F" Click="OnFindClick"/>
+                <MenuItem Header="Focus _Search Box" InputGesture="Ctrl+Shift+F" Command="{Binding ExecuteShortcutCommand}" CommandParameter="{x:Static enums:ApplicationShortcut.Find}"/>
+                <MenuItem Header="Cycle _Pane Focus" InputGesture="Ctrl+Shift+P" Click="OnCyclePaneClick"/>
+            </MenuItem>
+            <MenuItem Header="_Document">
+                <MenuItem Header="_Next Document" InputGesture="Ctrl+Tab" Command="{Binding ExecuteShortcutCommand}" CommandParameter="{x:Static enums:ApplicationShortcut.NextDocument}"/>
+                <MenuItem Header="_Previous Document" InputGesture="Ctrl+Shift+Tab" Command="{Binding ExecuteShortcutCommand}" CommandParameter="{x:Static enums:ApplicationShortcut.PreviousDocument}"/>
+                <Separator/>
+                <MenuItem Header="_Close Document" InputGesture="Ctrl+W" Click="OnCloseDocumentClick"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About SqlPhanos..." Click="OnAboutClick"/>
+            </MenuItem>
+        </Menu>
+
         <!-- Status bar at bottom -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemAccentColor}"

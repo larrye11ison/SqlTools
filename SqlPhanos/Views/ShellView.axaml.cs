@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
@@ -52,26 +53,42 @@ public partial class ShellView : Window
 
         if (e.Key == Key.W && e.KeyModifiers == KeyModifiers.Control)
         {
-            (DataContext as ShellViewModel)?.CloseActiveDocument();
+            CloseActiveDocument();
             e.Handled = true;
             return;
         }
 
         if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
         {
-            GetActiveDocumentView()?.OpenFind();
+            OpenFindInActiveDocument();
             e.Handled = true;
             return;
         }
 
         if (e.Key == Key.M && e.KeyModifiers == KeyModifiers.Control)
         {
-            if (GetActiveDocumentView()?.DataContext is SqlDocumentViewModel activeDocumentViewModel)
-            {
-                activeDocumentViewModel.ToggleDisplayModeCommand.Execute(null);
-            }
-
+            ToggleActiveDocumentFormatting();
             e.Handled = true;
+        }
+    }
+
+    // Shared by both the OnWindowKeyDown shortcuts above and the menu items below, so the
+    // top menu always does exactly what its matching keyboard shortcut does.
+    private void CloseActiveDocument()
+    {
+        (DataContext as ShellViewModel)?.CloseActiveDocument();
+    }
+
+    private void OpenFindInActiveDocument()
+    {
+        GetActiveDocumentView()?.OpenFind();
+    }
+
+    private void ToggleActiveDocumentFormatting()
+    {
+        if (GetActiveDocumentView()?.DataContext is SqlDocumentViewModel activeDocumentViewModel)
+        {
+            activeDocumentViewModel.ToggleDisplayModeCommand.Execute(null);
         }
     }
 
@@ -80,6 +97,28 @@ public partial class ShellView : Window
         var settingsView = new SettingsView();
         await settingsView.ShowDialog(this);
     }
+
+    private async void OnAboutClick(object? sender, RoutedEventArgs e)
+    {
+        var aboutView = new AboutView();
+        await aboutView.ShowDialog(this);
+    }
+
+    private void OnExitClick(object? sender, RoutedEventArgs e)
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+    }
+
+    private void OnToggleFormattingClick(object? sender, RoutedEventArgs e) => ToggleActiveDocumentFormatting();
+
+    private void OnFindClick(object? sender, RoutedEventArgs e) => OpenFindInActiveDocument();
+
+    private void OnCloseDocumentClick(object? sender, RoutedEventArgs e) => CloseActiveDocument();
+
+    private void OnCyclePaneClick(object? sender, RoutedEventArgs e) => FocusNextPane();
 
     private SqlDocumentView? GetActiveDocumentView()
     {

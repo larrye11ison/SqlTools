@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="320" d:DesignHeight="160"
+        x:Class="SqlPhanos.Views.AboutView"
+        Title="About SqlPhanos"
+        Width="320"
+        Height="160"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <DockPanel Margin="16">
+        <Button DockPanel.Dock="Bottom"
+                Content="OK"
+                HorizontalAlignment="Right"
+                Click="OnOkClick"
+                IsDefault="True"
+                Margin="0,16,0,0"/>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="SqlPhanos" FontWeight="Bold" FontSize="18"/>
+            <TextBlock Name="VersionText" FontSize="13"/>
+            <TextBlock Text="SQL Server object search &amp; scripting" FontSize="12" Opacity="0.7"/>
+        </StackPanel>
+    </DockPanel>
+
+</Window>
