@@ -204,7 +204,8 @@ public class SqlSearchService
                     // object type (see the SQL_TRIGGER case below).
                     Triggers = false,
                     ScriptSchema = true,
-                    ScriptData = false
+                    ScriptData = false,
+                    Permissions = true
                 };
 
                 var sb = new StringBuilder();
