@@ -1,10 +1,12 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Styling;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
+using SqlPhanos.Services;
 using SqlPhanos.ViewModels;
 using System.ComponentModel;
 using TextMateSharp.Grammars;
@@ -28,6 +30,10 @@ public partial class SqlDocumentView : UserControl
         DetachedFromVisualTree += (_, _) => DisposeTextMate();
         DataContextChanged += (_, _) => SyncFromViewModel();
         ActualThemeVariantChanged += (_, _) => ApplyTheme();
+
+        ApplyFont();
+        FontSettingsService.FontFamilyChanged += OnFontFamilyChanged;
+        DetachedFromVisualTree += (_, _) => FontSettingsService.FontFamilyChanged -= OnFontFamilyChanged;
     }
 
     public void FocusEditor()
@@ -59,6 +65,19 @@ public partial class SqlDocumentView : UserControl
     {
         AvaloniaXamlLoader.Load(this);
         _editor = this.FindControl<TextEditor>("Editor");
+    }
+
+    private void OnFontFamilyChanged(object? sender, System.EventArgs e)
+    {
+        ApplyFont();
+    }
+
+    private void ApplyFont()
+    {
+        if (_editor is not null)
+        {
+            _editor.FontFamily = new FontFamily(FontSettingsService.CurrentFontFamily);
+        }
     }
 
     private void EnsureTextMateInstalled()

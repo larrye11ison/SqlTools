@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using SqlPhanos.Services;
 using SqlPhanos.Views;
 
 namespace SqlPhanos;
@@ -14,6 +15,8 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        FontSettingsService.Initialize();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new ShellView();

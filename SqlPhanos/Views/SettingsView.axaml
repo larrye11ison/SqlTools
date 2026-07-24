@@ -1,0 +1,37 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SqlPhanos.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="180"
+        x:Class="SqlPhanos.Views.SettingsView"
+        x:DataType="vm:SettingsViewModel"
+        Title="Settings"
+        Width="420"
+        Height="180"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Design.DataContext>
+        <vm:SettingsViewModel/>
+    </Design.DataContext>
+
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8"
+                    Margin="0,16,0,0">
+            <Button Name="CancelButton" Content="Cancel" Click="OnCancelClick"/>
+            <Button Name="SaveButton" Content="Save" Click="OnSaveClick" IsDefault="True"/>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+            <TextBlock Text="Editor font" FontWeight="SemiBold"/>
+            <ComboBox ItemsSource="{Binding AvailableFonts}"
+                      SelectedItem="{Binding SelectedFont}"
+                      HorizontalAlignment="Stretch"/>
+        </StackPanel>
+    </DockPanel>
+
+</Window>
