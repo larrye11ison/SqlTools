@@ -10,6 +10,33 @@ namespace SqlPhanos.CodeFormatting;
 public sealed class SqlCanonicalizationService
 {
 	private const int LongExpressionLineBreakThreshold = 75;
+	private const int CasePhantomParenthesisDepth = -1;
+
+	public string FormatWithScriptDomDefaults(string sql)
+	{
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return sql;
+		}
+
+		try
+		{
+			var parser = new TSql160Parser(false);
+			TSqlFragment fragment;
+			using (var reader = new StringReader(sql))
+			{
+				fragment = parser.Parse(reader, out _);
+			}
+
+			var generator = new Sql160ScriptGenerator(new SqlScriptGeneratorOptions());
+			generator.GenerateScript(fragment, out var script);
+			return script;
+		}
+		catch
+		{
+			return sql;
+		}
+	}
 
 	public string FormatForDisplay(string sql)
 	{
@@ -65,9 +92,12 @@ public sealed class SqlCanonicalizationService
 			var selectStatementDepth = 0;
 			var parenthesisDepth = 0;
 			var inInClause = false;
+			var inSubqueryInClause = false;
 			var inClauseStartIndex = -1;
+			var inClauseDepth = -1;
 			var inCreateStatementParams = false;
 			var afterCreateObjectName = false;
+			var createObjectRequiresAs = true;
 			var pendingInsertColumnList = false;
 			var inInsertColumnList = false;
 			var inInsertWithHint = false;
@@ -78,12 +108,17 @@ public sealed class SqlCanonicalizationService
 			var valuesListDepth = -1;
 			var inDeclareStatement = false;
 			var pendingDeclareVariableContinuation = false;
+			var inUpdateSetClause = false;
+			var pendingUpdateSetClause = false;
 			var parenthesisStack = new Stack<ParenthesisScope>();
 			var pendingBeginTryCatchFinally = false;
 			var betweenAndJustEmitted = false;
 			var inCreateObjectParameterList = false;
 			var createObjectParameterListDepth = -1;
+			var applyParenthesisDepth = -1;
+			var overClauseParenDepth = -1;
 			var caseExpressionDepth = 0;
+			var caseWhenIndent = 0;
 			var currentLineTokenLength = 0;
 
 			for (var i = 0; i < tokens.Count; i++)
@@ -107,6 +142,20 @@ public sealed class SqlCanonicalizationService
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						afterCreateObjectName = true;
+						createObjectRequiresAs = true;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Table:
+						var previousTableIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var previousTableType = previousTableIndex >= 0 ? tokens[previousTableIndex].TokenType : TSqlTokenType.None;
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						if (previousTableType == TSqlTokenType.Create)
+						{
+							afterCreateObjectName = true;
+							createObjectRequiresAs = false;
+						}
 						previousWasStatementEnd = false;
 						break;
 
@@ -148,7 +197,9 @@ public sealed class SqlCanonicalizationService
 						if (IsInsideCaseBlock(tokens, i))
 						{
 							AppendLineIfNeeded(result, ref lineStart);
-							AppendIndentIfNeeded(result, indentLevel + 3 + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+							var elseIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+							caseWhenIndent = elseIndent;
+							AppendIndentIfNeeded(result, elseIndent, ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
 							result.Append(' ');
 						}
@@ -188,8 +239,12 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.End:
 						if (caseExpressionDepth > 0)
 						{
+							if (parenthesisStack.Count > 0 && parenthesisStack.Peek().ParenthesisDepth == CasePhantomParenthesisDepth)
+							{
+								parenthesisStack.Pop();
+							}
 							AppendLineIfNeeded(result, ref lineStart);
-							AppendIndentIfNeeded(result, indentLevel + 2 + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+							AppendIndentIfNeeded(result, GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth), ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
 							caseExpressionDepth = Math.Max(0, caseExpressionDepth - 1);
 							previousWasStatementEnd = false;
@@ -205,7 +260,12 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.Select:
 						AppendLineIfNeeded(result, ref lineStart);
-						var selectIndent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
+						var previousSelectIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var previousSelectType = previousSelectIndex >= 0 ? tokens[previousSelectIndex].TokenType : TSqlTokenType.None;
+						var selectIndent = GetSelectIndentForContext(
+							indentLevel,
+							parenthesisStack,
+							previousSelectType == TSqlTokenType.LeftParenthesis && inInClause);
 						AppendIndentIfNeeded(result, selectIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						var insideExpandedScope = parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth);
@@ -235,6 +295,15 @@ public sealed class SqlCanonicalizationService
 						result.Append(token.Text.ToUpperInvariant());
 						pendingInsertColumnList = true;
 						pendingValuesList = false;
+						pendingUpdateSetClause = false;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Update:
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						pendingUpdateSetClause = true;
 						previousWasStatementEnd = false;
 						break;
 
@@ -244,6 +313,19 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.Group:
 					case TSqlTokenType.Having:
 					case TSqlTokenType.Union:
+						if (token.TokenType == TSqlTokenType.Order && parenthesisDepth == overClauseParenDepth)
+						{
+							// ORDER BY inside an OVER(...) window clause is a sibling of PARTITION BY,
+							// not the enclosing statement's ORDER BY, so it must not close the select
+							// column list and must indent like any other content inside that paren.
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth), ref lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						inUpdateSetClause = false;
 						if (inSelectColumnList && selectStatementDepth > 0)
 						{
 							inSelectColumnList = false;
@@ -251,9 +333,42 @@ public sealed class SqlCanonicalizationService
 						}
 
 						AppendLineIfNeeded(result, ref lineStart);
-						var clauseIndent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
+						var clauseIndent = GetClauseIndentForContext(
+							indentLevel,
+							parenthesisStack,
+							inInClause && parenthesisDepth == inClauseDepth);
 						AppendIndentIfNeeded(result, clauseIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.GoTo:
+					case TSqlTokenType.Return:
+					case TSqlTokenType.Raiserror:
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Label:
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text);
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Set:
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						inUpdateSetClause = pendingUpdateSetClause;
+						pendingUpdateSetClause = false;
+						if (inUpdateSetClause)
+						{
+							result.AppendLine();
+							lineStart = true;
+						}
 						previousWasStatementEnd = false;
 						break;
 
@@ -264,6 +379,7 @@ public sealed class SqlCanonicalizationService
 						{
 							AppendSpaceIfNeeded(result, lineStart);
 							result.Append(token.Text.ToUpperInvariant());
+							pendingInsertColumnList = true;
 						}
 						else
 						{
@@ -279,7 +395,9 @@ public sealed class SqlCanonicalizationService
 						if (nextInIndex < tokens.Count && tokens[nextInIndex].TokenType == TSqlTokenType.LeftParenthesis)
 						{
 							inInClause = true;
+							inSubqueryInClause = false;
 							inClauseStartIndex = result.Length;
+							inClauseDepth = parenthesisDepth + 1;
 						}
 
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
@@ -321,21 +439,59 @@ public sealed class SqlCanonicalizationService
 						var isJoinModifier = nextJoinIndex < tokens.Count &&
 							(tokens[nextJoinIndex].TokenType == TSqlTokenType.Join ||
 							 tokens[nextJoinIndex].TokenType == TSqlTokenType.Outer ||
-							 tokens[nextJoinIndex].TokenType == TSqlTokenType.Inner);
+							 tokens[nextJoinIndex].TokenType == TSqlTokenType.Inner ||
+							 tokens[nextJoinIndex].TokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier &&
+								 tokens[nextJoinIndex].Text.Equals("APPLY", StringComparison.OrdinalIgnoreCase));
+						var joinIndent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
 
 						if (isJoinModifier)
 						{
-							AppendLineIfNeeded(result, ref lineStart);
+							var previousJoinIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+							var previousJoinType = previousJoinIndex >= 0 ? tokens[previousJoinIndex].TokenType : TSqlTokenType.None;
+							var isCompositeOuterModifier = token.TokenType == TSqlTokenType.Outer &&
+								previousJoinType is TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Full;
+
+							if (isCompositeOuterModifier)
+							{
+								if (lineStart)
+								{
+									AppendIndentIfNeeded(result, joinIndent, ref lineStart);
+								}
+								else
+								{
+									AppendSpaceIfNeeded(result, lineStart);
+								}
+							}
+							else
+							{
+								AppendLineIfNeeded(result, ref lineStart);
+								AppendIndentIfNeeded(result, joinIndent, ref lineStart);
+							}
+
+							result.Append(token.Text.ToUpperInvariant());
+							result.Append(' ');
+							previousWasStatementEnd = false;
+							break;
 						}
 
-						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						AppendIndentIfNeeded(result, joinIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
 						break;
 
 					case TSqlTokenType.Join:
-						AppendLineIfNeeded(result, ref lineStart);
-						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						var previousJoinKeywordIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var previousJoinKeywordType = previousJoinKeywordIndex >= 0 ? tokens[previousJoinKeywordIndex].TokenType : TSqlTokenType.None;
+						var isAfterJoinModifier = previousJoinKeywordType is TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Outer or TSqlTokenType.Cross or TSqlTokenType.Full;
+						if (isAfterJoinModifier)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+						}
+						else
+						{
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+						}
 						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
 						break;
@@ -374,7 +530,7 @@ public sealed class SqlCanonicalizationService
 						if (inCasePredicate)
 						{
 							AppendLineIfNeeded(result, ref lineStart);
-							AppendIndentIfNeeded(result, indentLevel + 5, ref lineStart);
+							AppendIndentIfNeeded(result, caseWhenIndent + 1, ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
 							result.Append(' ');
 							currentLineTokenLength = token.Text.Length + 1;
@@ -384,7 +540,8 @@ public sealed class SqlCanonicalizationService
 
 						AppendLineIfNeeded(result, ref lineStart);
 						AppendIndentIfNeeded(result, indentLevel + 1, ref lineStart);
-						result.Append(token.Text.ToUpperInvariant());
+						var keywordText = token.TokenType == TSqlTokenType.And && !inCasePredicate ? token.Text : token.Text.ToUpperInvariant();
+						result.Append(keywordText);
 						result.Append(' ');
 						currentLineTokenLength = token.Text.Length + 1;
 						previousWasStatementEnd = false;
@@ -392,23 +549,60 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.Plus:
 					case TSqlTokenType.Minus:
+					case TSqlTokenType.Divide:
+					case TSqlTokenType.Star:
+						if (token.TokenType == TSqlTokenType.Star && lineStart)
+						{
+							// A '*' at the start of a line is a SELECT * column, not a multiplication operator.
+							var starIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+							AppendIndentIfNeeded(result, starIndent, ref lineStart);
+							result.Append(token.Text);
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendSpaceIfNeeded(result, lineStart);
 						result.Append(token.Text);
-						if (parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth))
+						var nextOperatorIndex = NextNonWhitespaceIndex(tokens, i + 1);
+						var shouldBreakAfterOperator = false;
+						if (nextOperatorIndex < tokens.Count)
 						{
-							var nextOperatorIndex = NextNonWhitespaceIndex(tokens, i + 1);
-							if (nextOperatorIndex < tokens.Count && tokens[nextOperatorIndex].TokenType == TSqlTokenType.LeftParenthesis)
+							if (parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth) && tokens[nextOperatorIndex].TokenType == TSqlTokenType.LeftParenthesis)
 							{
-								TrimTrailingSpaces(result);
-								result.AppendLine();
-								lineStart = true;
-								currentLineTokenLength = 0;
-								previousWasStatementEnd = false;
-								break;
+								shouldBreakAfterOperator = true;
+							}
+							else
+							{
+								var currentLineLength = GetCurrentLineText(result).TrimStart('\t', ' ').Length;
+								if (currentLineLength > LongExpressionLineBreakThreshold)
+								{
+									shouldBreakAfterOperator = true;
+								}
+								else if (token.TokenType == TSqlTokenType.Plus && tokens[nextOperatorIndex].TokenType == TSqlTokenType.AsciiStringOrQuotedIdentifier && currentLineLength >= LongExpressionLineBreakThreshold)
+								{
+									shouldBreakAfterOperator = true;
+								}
 							}
 						}
-						result.Append(' ');
-						currentLineTokenLength += token.Text.Length + 1;
+
+						if (shouldBreakAfterOperator)
+						{
+							TrimTrailingSpaces(result);
+							result.AppendLine();
+							lineStart = true;
+							var operatorIndent = GetOperatorContinuationIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inInClause);
+							AppendIndentIfNeeded(result, operatorIndent, ref lineStart);
+							if (token.TokenType == TSqlTokenType.Plus)
+							{
+								TrimTrailingSpaces(result);
+							}
+							currentLineTokenLength = 0;
+						}
+						else
+						{
+							result.Append(' ');
+							currentLineTokenLength += token.Text.Length + 1;
+						}
 						previousWasStatementEnd = false;
 						break;
 
@@ -419,6 +613,11 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Comma:
+						if (lineStart)
+						{
+							AppendIndent(result, GetColumnListIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inCreateStatementParams, inInsertColumnList, afterCreateObjectName, inUpdateSetClause));
+							lineStart = false;
+						}
 						result.Append(token.Text);
 						currentLineTokenLength += token.Text.Length;
 						if (inDeclareStatement && parenthesisDepth == 0)
@@ -428,7 +627,19 @@ public sealed class SqlCanonicalizationService
 							currentLineTokenLength = 0;
 							pendingDeclareVariableContinuation = true;
 						}
-						else if (inInsertColumnList || inValuesList || inCreateStatementParams || (inSelectColumnList && selectStatementDepth > 0 && parenthesisDepth == 0))
+						else if (inUpdateSetClause && parenthesisDepth == 0)
+						{
+							result.AppendLine();
+							lineStart = true;
+							currentLineTokenLength = 0;
+						}
+						else if ((inInsertColumnList && parenthesisDepth == insertColumnListDepth) || (inValuesList && parenthesisDepth == valuesListDepth) || (inCreateStatementParams && parenthesisDepth == (createObjectParameterListDepth < 0 ? 0 : createObjectParameterListDepth)) || (inSelectColumnList && selectStatementDepth > 0 && (parenthesisDepth == 0 || (applyParenthesisDepth > 0 && parenthesisDepth == applyParenthesisDepth))))
+						{
+							result.AppendLine();
+							lineStart = true;
+							currentLineTokenLength = 0;
+						}
+						else if (parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth) && inValuesList)
 						{
 							result.AppendLine();
 							lineStart = true;
@@ -438,10 +649,7 @@ public sealed class SqlCanonicalizationService
 						{
 							var currentLine = GetCurrentLineText(result).Trim();
 							var nextArgumentLength = GetNextTopLevelArgumentLength(tokens, i + 1, parenthesisDepth);
-							var previousCommaIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
-							var previousCommaType = previousCommaIndex >= 0 ? tokens[previousCommaIndex].TokenType : TSqlTokenType.None;
-							var forceBreakForComplexFunctionArguments = previousCommaType == TSqlTokenType.RightParenthesis && nextArgumentLength > 20;
-							if (!forceBreakForComplexFunctionArguments && !IsOnlyClosingParenthesesLine(currentLine) && nextArgumentLength > 0 && currentLine.Length + 1 + nextArgumentLength <= LongExpressionLineBreakThreshold)
+							if (!IsOnlyClosingParenthesesLine(currentLine) && nextArgumentLength > 0 && currentLine.Length + 1 + nextArgumentLength <= LongExpressionLineBreakThreshold)
 							{
 								result.Append(' ');
 								currentLineTokenLength++;
@@ -473,6 +681,12 @@ public sealed class SqlCanonicalizationService
 						parenthesisDepth++;
 						var previousIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 						var previousTokenType = previousIndex >= 0 ? tokens[previousIndex].TokenType : TSqlTokenType.None;
+						var previousText = previousIndex >= 0 ? tokens[previousIndex].Text : string.Empty;
+
+						if (previousTokenType == TSqlTokenType.Over)
+						{
+							overClauseParenDepth = parenthesisDepth;
+						}
 
 						if (afterCreateObjectName)
 						{
@@ -503,7 +717,12 @@ public sealed class SqlCanonicalizationService
 							pendingInsertColumnList = false;
 							inInsertColumnList = true;
 							insertColumnListDepth = parenthesisDepth;
-							AppendSpaceIfNeeded(result, lineStart);
+							if (!lineStart)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 							result.Append(token.Text);
 							result.AppendLine();
 							lineStart = true;
@@ -517,6 +736,11 @@ public sealed class SqlCanonicalizationService
 							pendingValuesList = false;
 							inValuesList = true;
 							valuesListDepth = parenthesisDepth;
+							if (!lineStart)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
 							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 							result.Append(token.Text);
 							result.AppendLine();
@@ -526,7 +750,44 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
-						var forceExpandParenthesis = previousTokenType == TSqlTokenType.Exists;
+						if (inInClause && previousTokenType == TSqlTokenType.In)
+						{
+							var nextInElementIndex = NextNonWhitespaceIndex(tokens, i + 1);
+							inSubqueryInClause = nextInElementIndex < tokens.Count && tokens[nextInElementIndex].TokenType == TSqlTokenType.Select;
+							if (inSubqueryInClause)
+							{
+								if (!lineStart)
+								{
+									result.AppendLine();
+									lineStart = true;
+								}
+								AppendIndentIfNeeded(result, indentLevel + 1 + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+								result.Append(token.Text);
+								result.AppendLine();
+								lineStart = true;
+								previousWasStatementEnd = false;
+								break;
+							}
+						}
+
+						if (previousTokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier && previousText.Equals("APPLY", StringComparison.OrdinalIgnoreCase))
+						{
+							applyParenthesisDepth = parenthesisDepth;
+							parenthesisStack.Push(new ParenthesisScope(parenthesisDepth));
+							if (!lineStart)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append(token.Text);
+							result.AppendLine();
+							lineStart = true;
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						var forceExpandParenthesis = previousTokenType == TSqlTokenType.Exists || (inValuesList && previousTokenType == TSqlTokenType.Identifier && previousText.Equals("CONCAT", StringComparison.OrdinalIgnoreCase));
 						var shouldExpandParenthesis = !inDeclareStatement &&
 							previousIndex >= 0 &&
 							previousTokenType is not TSqlTokenType.If and not TSqlTokenType.While &&
@@ -541,6 +802,13 @@ public sealed class SqlCanonicalizationService
 								{
 									expandedIndent++;
 								}
+								AppendIndentIfNeeded(result, Math.Max(0, expandedIndent), ref lineStart);
+							}
+							else if (inValuesList && previousTokenType == TSqlTokenType.Identifier && previousText.Equals("CONCAT", StringComparison.OrdinalIgnoreCase))
+							{
+								result.AppendLine();
+								lineStart = true;
+								var expandedIndent = indentLevel + Math.Max(0, GetActiveExpandedParenthesisDepth(parenthesisStack) - 1);
 								AppendIndentIfNeeded(result, Math.Max(0, expandedIndent), ref lineStart);
 							}
 							result.Append(token.Text);
@@ -574,7 +842,12 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.RightParenthesis:
-						if (inInClause && parenthesisDepth == 1)
+						if (parenthesisDepth == overClauseParenDepth)
+						{
+							overClauseParenDepth = -1;
+						}
+
+						if (inInClause && parenthesisDepth == inClauseDepth)
 						{
 							var inClauseLength = result.Length - inClauseStartIndex;
 							if (inClauseLength > 0)
@@ -586,6 +859,7 @@ public sealed class SqlCanonicalizationService
 									FormatInClauseMultiline(result, inClauseContent, indentLevel);
 									inInClause = false;
 									inClauseStartIndex = -1;
+									inClauseDepth = -1;
 									parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
 									PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 									previousWasStatementEnd = false;
@@ -595,6 +869,28 @@ public sealed class SqlCanonicalizationService
 
 							inInClause = false;
 							inClauseStartIndex = -1;
+							inClauseDepth = -1;
+							if (inSubqueryInClause)
+							{
+								inSubqueryInClause = false;
+								parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+								if (!lineStart)
+								{
+									result.AppendLine();
+									lineStart = true;
+								}
+								AppendIndent(result, indentLevel + 1);
+								result.Append(token.Text);
+								result.AppendLine();
+								lineStart = true;
+								PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
+								previousWasStatementEnd = false;
+								break;
+							}
+							result.Append(token.Text);
+							parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+							previousWasStatementEnd = false;
+							break;
 						}
 
 						if (inInsertWithHint && parenthesisDepth == insertWithHintDepth)
@@ -635,6 +931,22 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
+						if (applyParenthesisDepth == parenthesisDepth)
+						{
+							parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+							if (!lineStart)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append(token.Text);
+							PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
+							applyParenthesisDepth = -1;
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						var shouldExpandClosingParenthesis = HasParenthesisScope(parenthesisStack, parenthesisDepth);
 						var closingDepth = parenthesisDepth;
 						parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
@@ -648,10 +960,18 @@ public sealed class SqlCanonicalizationService
 							}
 							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 							result.Append(token.Text);
-							result.AppendLine();
-							lineStart = true;
 							inCreateObjectParameterList = false;
 							createObjectParameterListDepth = -1;
+							if (createObjectRequiresAs)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
+							else
+							{
+								// TABLE has no trailing AS keyword, so ')' just stays inline (e.g. for a following ';').
+								inCreateStatementParams = false;
+							}
 							PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 							previousWasStatementEnd = false;
 							break;
@@ -660,7 +980,16 @@ public sealed class SqlCanonicalizationService
 						if (shouldExpandClosingParenthesis)
 						{
 							result.AppendLine();
-							AppendIndent(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack));
+							var nextClosingIndex = NextNonWhitespaceIndex(tokens, i + 1);
+							var nextClosingTokenType = nextClosingIndex < tokens.Count ? tokens[nextClosingIndex].TokenType : (TSqlTokenType?)null;
+							var closingIndent = GetClosingParenIndentForContext(
+								indentLevel,
+								parenthesisStack,
+								inValuesList,
+								parenthesisDepth,
+								valuesListDepth,
+								nextClosingTokenType);
+							AppendIndent(result, closingIndent);
 							result.Append(token.Text);
 							PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 							previousWasStatementEnd = false;
@@ -681,6 +1010,8 @@ public sealed class SqlCanonicalizationService
 						selectStatementDepth = 0;
 						inDeclareStatement = false;
 						pendingDeclareVariableContinuation = false;
+						inUpdateSetClause = false;
+						pendingUpdateSetClause = false;
 						break;
 
 					case TSqlTokenType.Go:
@@ -692,6 +1023,8 @@ public sealed class SqlCanonicalizationService
 						previousWasStatementEnd = true;
 						inSelectColumnList = false;
 						selectStatementDepth = 0;
+						inUpdateSetClause = false;
+						pendingUpdateSetClause = false;
 						break;
 
 					case TSqlTokenType.WhiteSpace:
@@ -699,8 +1032,13 @@ public sealed class SqlCanonicalizationService
 						{
 							if (afterCreateObjectName && !lineStart)
 							{
-								result.AppendLine();
-								lineStart = true;
+								var nextCreateNewlineIndex = NextNonWhitespaceIndex(tokens, i + 1);
+								var nextCreateNewlineType = nextCreateNewlineIndex < tokens.Count ? tokens[nextCreateNewlineIndex].TokenType : TSqlTokenType.None;
+								if (nextCreateNewlineType != TSqlTokenType.LeftParenthesis)
+								{
+									result.AppendLine();
+									lineStart = true;
+								}
 							}
 
 							if (previousWasStatementEnd && !lineStart)
@@ -711,7 +1049,8 @@ public sealed class SqlCanonicalizationService
 								previousWasStatementEnd = false;
 							}
 						}
-						else if (!lineStart)
+
+						if (!lineStart)
 						{
 							var nextIndex = NextNonWhitespaceIndex(tokens, i + 1);
 							if (betweenAndJustEmitted)
@@ -745,7 +1084,8 @@ public sealed class SqlCanonicalizationService
 							{
 								var previousCreateIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 								var previousCreateType = previousCreateIndex >= 0 ? tokens[previousCreateIndex].TokenType : TSqlTokenType.None;
-								if (previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger)
+								var nextCreateType = nextIndex < tokens.Count ? tokens[nextIndex].TokenType : TSqlTokenType.None;
+								if (previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger or TSqlTokenType.Table || nextCreateType == TSqlTokenType.LeftParenthesis)
 								{
 									result.Append(' ');
 								}
@@ -763,7 +1103,7 @@ public sealed class SqlCanonicalizationService
 								break;
 							}
 
-							if (result.Length > 0 && result[^1] != ' ' &&
+							if (result.Length > 0 && result[^1] != ' ' && result[^1] != '\t' &&
 								nextType is not TSqlTokenType.Comma and not TSqlTokenType.RightParenthesis and not TSqlTokenType.Semicolon)
 							{
 								result.Append(' ');
@@ -805,6 +1145,10 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.MultilineComment:
+						if (!lineStart)
+						{
+							AppendLineIfNeeded(result, ref lineStart);
+						}
 						if (lineStart)
 						{
 							var extraIndent = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
@@ -822,20 +1166,29 @@ public sealed class SqlCanonicalizationService
 						{
 							lineStart = true;
 						}
+						else
+						{
+							result.AppendLine();
+							lineStart = true;
+						}
 						previousWasStatementEnd = false;
 						break;
 
 					case TSqlTokenType.Case:
 						caseExpressionDepth++;
 						AppendLineIfNeeded(result, ref lineStart);
-						AppendIndentIfNeeded(result, indentLevel + 2 + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+						var caseIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+						AppendIndentIfNeeded(result, caseIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
+						parenthesisStack.Push(new ParenthesisScope(CasePhantomParenthesisDepth));
 						previousWasStatementEnd = false;
 						break;
 
 					case TSqlTokenType.When:
 						AppendLineIfNeeded(result, ref lineStart);
-						AppendIndentIfNeeded(result, indentLevel + 3 + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+						var whenIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+						caseWhenIndent = whenIndent;
+						AppendIndentIfNeeded(result, whenIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						result.Append(' ');
 						previousWasStatementEnd = false;
@@ -853,8 +1206,12 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.QuotedIdentifier:
 						if (pendingDeclareVariableContinuation && lineStart)
 						{
-							AppendIndent(result, indentLevel + 1);
-							lineStart = false;
+							var continuationIndent = GetDeclarationContinuationIndent(token.Text.StartsWith("@", StringComparison.Ordinal));
+							if (continuationIndent > 0)
+							{
+								result.Append(new string(' ', continuationIndent));
+								lineStart = false;
+							}
 							pendingDeclareVariableContinuation = false;
 						}
 
@@ -925,7 +1282,7 @@ public sealed class SqlCanonicalizationService
 						{
 							var extraIndent = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
 							var suppressParenIndent = false;
-							if ((inCreateStatementParams || inInsertColumnList || inValuesList) && !afterCreateObjectName)
+							if ((inCreateStatementParams || inInsertColumnList) && !afterCreateObjectName)
 							{
 								extraIndent = 1;
 								suppressParenIndent = true;
@@ -933,6 +1290,10 @@ public sealed class SqlCanonicalizationService
 							if (!suppressParenIndent)
 							{
 								extraIndent += GetActiveExpandedParenthesisDepth(parenthesisStack);
+							}
+							if (inUpdateSetClause)
+							{
+								extraIndent++;
 							}
 							AppendIndent(result, indentLevel + extraIndent);
 							lineStart = false;
@@ -944,18 +1305,7 @@ public sealed class SqlCanonicalizationService
 					default:
 						if (lineStart)
 						{
-							var extraIndent = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
-							var suppressParenIndent = false;
-							if ((inCreateStatementParams || inInsertColumnList || inValuesList) && !afterCreateObjectName)
-							{
-								extraIndent = 1;
-								suppressParenIndent = true;
-							}
-							if (!suppressParenIndent)
-							{
-								extraIndent += GetActiveExpandedParenthesisDepth(parenthesisStack);
-							}
-							AppendIndent(result, indentLevel + extraIndent);
+							AppendIndent(result, GetColumnListIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inCreateStatementParams, inInsertColumnList, afterCreateObjectName, inUpdateSetClause));
 							lineStart = false;
 						}
 
@@ -1019,783 +1369,6 @@ public sealed class SqlCanonicalizationService
 		}
 	}
 
-	private static void TrimTrailingSpaces(StringBuilder result)
-	{
-		while (result.Length > 0 && result[^1] == ' ')
-		{
-			result.Length--;
-		}
-	}
-
-	private static void FormatInClauseMultiline(StringBuilder result, string inClauseContent, int indentLevel)
-	{
-		var startParen = inClauseContent.IndexOf('(');
-		if (startParen < 0)
-		{
-			result.Append(inClauseContent);
-			return;
-		}
-
-		var prefix = inClauseContent[..(startParen + 1)].Trim();
-		result.Append(prefix);
-		result.AppendLine();
-
-		var valuesPart = inClauseContent[(startParen + 1)..].Trim().TrimEnd(')');
-		var values = valuesPart
-			.Split([','], StringSplitOptions.RemoveEmptyEntries)
-			.Select(value => value.Trim())
-			.ToList();
-
-		var indent = new string('\t', indentLevel + 1);
-		var currentLine = new StringBuilder();
-
-		foreach (var value in values)
-		{
-			var separatorLength = currentLine.Length > 0 ? 2 : 0;
-			if (currentLine.Length > 0 && indent.Length + currentLine.Length + separatorLength + value.Length > 120)
-			{
-				result.Append(indent);
-				result.Append(currentLine);
-				result.AppendLine();
-				currentLine.Clear();
-			}
-
-			if (currentLine.Length > 0)
-			{
-				currentLine.Append(", ");
-			}
-
-			currentLine.Append(value);
-		}
-
-		if (currentLine.Length > 0)
-		{
-			result.Append(indent);
-			result.Append(currentLine);
-			result.AppendLine();
-		}
-
-		result.Append(new string('\t', Math.Max(0, indentLevel)));
-		result.Append(')');
-	}
-
-	private static int GetActiveExpandedParenthesisDepth(Stack<ParenthesisScope> parenthesisStack)
-	{
-		return parenthesisStack.Count;
-	}
-
-	private static bool HasParenthesisScope(Stack<ParenthesisScope> parenthesisStack, int parenthesisDepth)
-	{
-		return parenthesisStack.Count > 0 && parenthesisStack.Peek().ParenthesisDepth == parenthesisDepth;
-	}
-
-	private static bool IsBuiltInFunction(TSqlTokenType tokenType)
-	{
-		return tokenType is TSqlTokenType.Coalesce or TSqlTokenType.NullIf;
-	}
-
-	private static string NormalizeSingleLineCommentBoundaries(string sql)
-	{
-		if (string.IsNullOrWhiteSpace(sql))
-		{
-			return sql;
-		}
-
-		var normalized = sql
-			.Replace("\r\n", "\n")
-			.Replace('\r', '\n');
-
-		// Ensure GO batch separator is always on its own line.
-		normalized = System.Text.RegularExpressions.Regex.Replace(
-			normalized,
-			@"(?i)\s*\bGO\b\s*",
-			$"{Environment.NewLine}GO{Environment.NewLine}");
-
-		// Keep single-line comments physically separated.
-		normalized = System.Text.RegularExpressions.Regex.Replace(
-			normalized,
-			@"(?m)(?<!^)\s*(--)",
-			$"{Environment.NewLine}$1");
-
-		// Remove blank/whitespace-only lines.
-		normalized = string.Join(
-			Environment.NewLine,
-			normalized
-				.Split('\n')
-				.Select(line => line.TrimEnd())
-				.Where(line => !string.IsNullOrWhiteSpace(line)));
-
-		return normalized;
-	}
-
-	private static bool TryFormatCollapsedTryCatchFinally(string sql, out string formatted)
-	{
-		formatted = string.Empty;
-		if (string.IsNullOrWhiteSpace(sql))
-		{
-			return false;
-		}
-
-		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
-		const string beginTry = "BEGIN TRY ";
-		const string endTryBeginCatch = " END TRY BEGIN CATCH ";
-		const string endCatchBeginFinally = " END CATCH BEGIN FINALLY ";
-		const string endSuffix = " END";
-
-		if (!normalized.StartsWith(beginTry, StringComparison.OrdinalIgnoreCase) ||
-			!normalized.Contains(endTryBeginCatch, StringComparison.OrdinalIgnoreCase) ||
-			!normalized.Contains(endCatchBeginFinally, StringComparison.OrdinalIgnoreCase) ||
-			!normalized.EndsWith(endSuffix, StringComparison.OrdinalIgnoreCase))
-		{
-			return false;
-		}
-
-		var tryStart = beginTry.Length;
-		var endTryIndex = normalized.IndexOf(endTryBeginCatch, StringComparison.OrdinalIgnoreCase);
-		if (endTryIndex <= tryStart)
-		{
-			return false;
-		}
-
-		var catchStart = endTryIndex + endTryBeginCatch.Length;
-		var endCatchIndex = normalized.IndexOf(endCatchBeginFinally, catchStart, StringComparison.OrdinalIgnoreCase);
-		if (endCatchIndex <= catchStart)
-		{
-			return false;
-		}
-
-		var finallyStart = endCatchIndex + endCatchBeginFinally.Length;
-		var endIndex = normalized.Length - endSuffix.Length;
-		if (endIndex <= finallyStart)
-		{
-			return false;
-		}
-
-		var tryBody = normalized[tryStart..endTryIndex].Trim();
-		var catchBody = normalized[catchStart..endCatchIndex].Trim();
-		var finallyBody = normalized[finallyStart..endIndex].Trim();
-
-		formatted = string.Join(Environment.NewLine,
-		[
-			"BEGIN TRY",
-			$"\t{tryBody}",
-			"END TRY",
-			"BEGIN CATCH",
-			$"\t{catchBody}",
-			"END CATCH",
-			"BEGIN FINALLY",
-			$"\t{finallyBody}",
-			"END"
-		]);
-
-		return true;
-	}
-
-	private static bool StartsOnNewLine(TSqlTokenType tokenType)
-	{
-		return tokenType is
-			TSqlTokenType.Select or
-			TSqlTokenType.From or
-			TSqlTokenType.Where or
-			TSqlTokenType.Order or
-			TSqlTokenType.Group or
-			TSqlTokenType.Having or
-			TSqlTokenType.Union or
-			TSqlTokenType.Into or
-			TSqlTokenType.Values or
-			TSqlTokenType.Left or
-			TSqlTokenType.Right or
-			TSqlTokenType.Inner or
-			TSqlTokenType.Outer or
-			TSqlTokenType.Cross or
-			TSqlTokenType.Full or
-			TSqlTokenType.And or
-			TSqlTokenType.Or or
-			TSqlTokenType.Begin or
-			TSqlTokenType.End or
-			TSqlTokenType.Else or
-			TSqlTokenType.Go;
-	}
-
-	private static bool IsTryCatchFinallyToken(TSqlParserToken token)
-	{
-		return token.TokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier &&
-			(token.Text.Equals("TRY", StringComparison.OrdinalIgnoreCase) ||
-			token.Text.Equals("CATCH", StringComparison.OrdinalIgnoreCase) ||
-			token.Text.Equals("FINALLY", StringComparison.OrdinalIgnoreCase));
-	}
-
-	private static bool ShouldKeepSelectInline(IList<TSqlParserToken> tokens, int selectIndex)
-	{
-		var parenthesisDepth = 0;
-		var hasTopLevelProjectionToken = false;
-		var hasTopLevelProjectionComma = false;
-		var firstProjectionTokenType = TSqlTokenType.None;
-		for (var i = selectIndex + 1; i < tokens.Count; i++)
-		{
-			var tokenType = tokens[i].TokenType;
-			if (tokenType == TSqlTokenType.WhiteSpace)
-			{
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.LeftParenthesis)
-			{
-				parenthesisDepth++;
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.RightParenthesis)
-			{
-				parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
-				continue;
-			}
-
-			if (parenthesisDepth > 0)
-			{
-				continue;
-			}
-
-			if (!hasTopLevelProjectionToken)
-			{
-				firstProjectionTokenType = tokenType;
-			}
-
-			if (tokenType == TSqlTokenType.Comma)
-			{
-				hasTopLevelProjectionComma = true;
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.From)
-			{
-				return hasTopLevelProjectionToken &&
-					!hasTopLevelProjectionComma &&
-					firstProjectionTokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier or TSqlTokenType.Variable;
-			}
-
-			if (tokenType is TSqlTokenType.Semicolon or TSqlTokenType.Go or TSqlTokenType.End)
-			{
-				return hasTopLevelProjectionToken && !hasTopLevelProjectionComma;
-			}
-
-			if (tokenType is TSqlTokenType.Where or TSqlTokenType.Group or TSqlTokenType.Order or TSqlTokenType.Having or TSqlTokenType.Join or TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Full or TSqlTokenType.Cross or TSqlTokenType.Union)
-			{
-				return false;
-			}
-
-			hasTopLevelProjectionToken = true;
-		}
-
-		return false;
-	}
-
-	private static bool ShouldKeepSelectInlineInParenthesizedSubquery(IList<TSqlParserToken> tokens, int selectIndex)
-	{
-		var parenthesisDepth = 0;
-		var hasTopLevelProjectionToken = false;
-		var hasTopLevelProjectionComma = false;
-		for (var i = selectIndex + 1; i < tokens.Count; i++)
-		{
-			var tokenType = tokens[i].TokenType;
-			if (tokenType == TSqlTokenType.WhiteSpace)
-			{
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.LeftParenthesis)
-			{
-				parenthesisDepth++;
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.RightParenthesis)
-			{
-				parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
-				continue;
-			}
-
-			if (parenthesisDepth > 0)
-			{
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.Comma)
-			{
-				hasTopLevelProjectionComma = true;
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.From && hasTopLevelProjectionToken && !hasTopLevelProjectionComma)
-			{
-				return true;
-			}
-
-			if (tokenType is TSqlTokenType.Semicolon or TSqlTokenType.Go or TSqlTokenType.End or TSqlTokenType.Where or TSqlTokenType.Group or TSqlTokenType.Order or TSqlTokenType.Having or TSqlTokenType.Join or TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Full or TSqlTokenType.Cross or TSqlTokenType.Union)
-			{
-				return false;
-			}
-
-			hasTopLevelProjectionToken = true;
-		}
-
-		return false;
-	}
-
-	private static bool ShouldExpandParenthesisForDisplay(IList<TSqlParserToken> tokens, int leftParenthesisIndex)
-	{
-		var rightParenthesisIndex = FindMatchingRightParenthesisIndex(tokens, leftParenthesisIndex);
-		if (rightParenthesisIndex <= leftParenthesisIndex)
-		{
-			return false;
-		}
-
-		var flatLength = 0;
-		for (var i = leftParenthesisIndex; i <= rightParenthesisIndex; i++)
-		{
-			var token = tokens[i];
-			if (token.TokenType == TSqlTokenType.WhiteSpace)
-			{
-				if (flatLength > 0)
-				{
-					flatLength++;
-				}
-				continue;
-			}
-
-			flatLength += token.Text.Length;
-		}
-
-		return flatLength > LongExpressionLineBreakThreshold;
-	}
-
-	private static int FindMatchingRightParenthesisIndex(IList<TSqlParserToken> tokens, int leftParenthesisIndex)
-	{
-		var depth = 0;
-		for (var i = leftParenthesisIndex; i < tokens.Count; i++)
-		{
-			if (tokens[i].TokenType == TSqlTokenType.LeftParenthesis)
-			{
-				depth++;
-			}
-			else if (tokens[i].TokenType == TSqlTokenType.RightParenthesis)
-			{
-				depth--;
-				if (depth == 0)
-				{
-					return i;
-				}
-			}
-		}
-
-		return -1;
-	}
-
-	private static bool IsKeyword(TSqlTokenType tokenType)
-	{
-		return tokenType switch
-		{
-			TSqlTokenType.Select or
-			TSqlTokenType.From or
-			TSqlTokenType.Where or
-			TSqlTokenType.Insert or
-			TSqlTokenType.Update or
-			TSqlTokenType.Delete or
-			TSqlTokenType.Create or
-			TSqlTokenType.Alter or
-			TSqlTokenType.Drop or
-			TSqlTokenType.Proc or
-			TSqlTokenType.Procedure or
-			TSqlTokenType.Function or
-			TSqlTokenType.View or
-			TSqlTokenType.Trigger or
-			TSqlTokenType.Begin or
-			TSqlTokenType.End or
-			TSqlTokenType.If or
-			TSqlTokenType.Else or
-			TSqlTokenType.While or
-			TSqlTokenType.Return or
-			TSqlTokenType.Declare or
-			TSqlTokenType.Set or
-			TSqlTokenType.As or
-			TSqlTokenType.Join or
-			TSqlTokenType.Left or
-			TSqlTokenType.Right or
-			TSqlTokenType.Inner or
-			TSqlTokenType.Outer or
-			TSqlTokenType.Cross or
-			TSqlTokenType.Full or
-			TSqlTokenType.On or
-			TSqlTokenType.And or
-			TSqlTokenType.Or or
-			TSqlTokenType.Not or
-			TSqlTokenType.Null or
-			TSqlTokenType.Is or
-			TSqlTokenType.In or
-			TSqlTokenType.Between or
-			TSqlTokenType.Like or
-			TSqlTokenType.Exists or
-			TSqlTokenType.Case or
-			TSqlTokenType.When or
-			TSqlTokenType.Then or
-			TSqlTokenType.Order or
-			TSqlTokenType.By or
-			TSqlTokenType.Group or
-			TSqlTokenType.Having or
-			TSqlTokenType.Distinct or
-			TSqlTokenType.Top or
-			TSqlTokenType.With or
-			TSqlTokenType.Union or
-			TSqlTokenType.All or
-			TSqlTokenType.Into or
-			TSqlTokenType.Values or
-			TSqlTokenType.Table or
-			TSqlTokenType.Execute or
-			TSqlTokenType.Exec => true,
-			_ => false
-		};
-	}
-
-	private static int GetNextTopLevelArgumentLength(IList<TSqlParserToken> tokens, int startIndex, int currentParenthesisDepth)
-	{
-		var depth = currentParenthesisDepth;
-		var length = 0;
-		var seenNonWhitespace = false;
-
-		for (var i = startIndex; i < tokens.Count; i++)
-		{
-			var token = tokens[i];
-			if (token.TokenType == TSqlTokenType.LeftParenthesis)
-			{
-				depth++;
-				length += token.Text.Length;
-				seenNonWhitespace = true;
-				continue;
-			}
-
-			if (token.TokenType == TSqlTokenType.RightParenthesis)
-			{
-				if (depth == currentParenthesisDepth)
-				{
-					break;
-				}
-
-				depth--;
-				length += token.Text.Length;
-				seenNonWhitespace = true;
-				continue;
-			}
-
-			if (depth == currentParenthesisDepth && token.TokenType == TSqlTokenType.Comma)
-			{
-				break;
-			}
-
-			if (token.TokenType == TSqlTokenType.WhiteSpace)
-			{
-				if (seenNonWhitespace)
-				{
-					length++;
-				}
-				continue;
-			}
-
-			length += token.Text.Length;
-			seenNonWhitespace = true;
-		}
-
-		return length;
-	}
-
-	private static string GetCurrentLineText(StringBuilder result)
-	{
-		for (var i = result.Length - 1; i >= 0; i--)
-		{
-			if (result[i] == '\n')
-			{
-				return result.ToString(i + 1, result.Length - i - 1);
-			}
-		}
-
-		return result.ToString();
-	}
-
-	private static bool IsOnlyClosingParenthesesLine(string line)
-	{
-		if (string.IsNullOrWhiteSpace(line))
-		{
-			return false;
-		}
-
-		for (var i = 0; i < line.Length; i++)
-		{
-			var c = line[i];
-			if (!char.IsWhiteSpace(c) && c != ')' && c != ',')
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	private static int GetExpressionLengthUntilClauseBoundary(IList<TSqlParserToken> tokens, int startIndex)
-	{
-		var length = 0;
-		for (var i = startIndex; i < tokens.Count; i++)
-		{
-			var token = tokens[i];
-			if (token.TokenType == TSqlTokenType.WhiteSpace)
-			{
-				if (length > 0)
-				{
-					length++;
-				}
-				continue;
-			}
-
-			if (token.TokenType == TSqlTokenType.EndOfFile || IsClauseBoundaryToken(token.TokenType))
-			{
-				break;
-			}
-
-			if (string.IsNullOrEmpty(token.Text))
-			{
-				continue;
-			}
-
-			length += token.Text.Length;
-		}
-
-		return length;
-	}
-
-	private static bool IsClauseBoundaryToken(TSqlTokenType tokenType)
-	{
-		return tokenType is TSqlTokenType.And or TSqlTokenType.Or or TSqlTokenType.Group or TSqlTokenType.Having or TSqlTokenType.Order or TSqlTokenType.Union or TSqlTokenType.Except or TSqlTokenType.Intersect or TSqlTokenType.From or TSqlTokenType.Where or TSqlTokenType.Semicolon;
-	}
-
-	private static bool IsInsideCaseBlock(IList<TSqlParserToken> tokens, int tokenIndex)
-	{
-		var depth = 0;
-		for (var i = tokenIndex - 1; i >= 0; i--)
-		{
-			var tokenType = tokens[i].TokenType;
-			if (tokenType == TSqlTokenType.RightParenthesis)
-			{
-				depth++;
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.LeftParenthesis)
-			{
-				depth = Math.Max(0, depth - 1);
-				continue;
-			}
-
-			if (depth > 0 || tokenType == TSqlTokenType.WhiteSpace)
-			{
-				continue;
-			}
-
-			if (tokenType == TSqlTokenType.Case)
-			{
-				return true;
-			}
-
-			if (tokenType is TSqlTokenType.End or TSqlTokenType.Semicolon)
-			{
-				return false;
-			}
-		}
-
-		return false;
-	}
-
-	private static bool IsBetweenAndToken(IList<TSqlParserToken> tokens, int andIndex)
-	{
-		var depth = 0;
-		for (var i = andIndex - 1; i >= 0; i--)
-		{
-			var token = tokens[i];
-			if (token.TokenType == TSqlTokenType.RightParenthesis)
-			{
-				depth++;
-				continue;
-			}
-
-			if (token.TokenType == TSqlTokenType.LeftParenthesis)
-			{
-				depth = Math.Max(0, depth - 1);
-				continue;
-			}
-
-			if (token.TokenType == TSqlTokenType.WhiteSpace)
-			{
-				continue;
-			}
-
-			if (depth > 0)
-			{
-				continue;
-			}
-
-			if (token.TokenType == TSqlTokenType.Between)
-			{
-				return true;
-			}
-
-			if (IsClauseBoundaryToken(token.TokenType))
-			{
-				return false;
-			}
-		}
-
-		return false;
-	}
-
-	private static int NextNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
-	{
-		var index = startIndex;
-		while (index < tokens.Count && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
-		{
-			index++;
-		}
-
-		return index;
-	}
-
-	private static void PopParenthesisScope(Stack<ParenthesisScope> parenthesisStack, int parenthesisDepth)
-	{
-		if (HasParenthesisScope(parenthesisStack, parenthesisDepth))
-		{
-			parenthesisStack.Pop();
-		}
-	}
-
-	private static int PreviousNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
-	{
-		var index = startIndex;
-		while (index >= 0 && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
-		{
-			index--;
-		}
-
-		return index;
-	}
-
-	private static bool ShouldBreakAfterComma(bool inInsertColumnList, bool inValuesList, bool inCreateStatementParams, bool inSelectColumnList, int selectStatementDepth, int parenthesisDepth, Stack<ParenthesisScope> parenthesisStack, bool inInClause)
-	{
-		if (inInsertColumnList || inValuesList || inCreateStatementParams || (inSelectColumnList && selectStatementDepth > 0 && parenthesisDepth == 0))
-		{
-			return true;
-		}
-
-		return parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth) && !inInClause;
-	}
-
-	private static bool ShouldFormatInClauseMultiline(string inClauseContent, int indentLevel)
-	{
-		var indentLength = Math.Max(0, indentLevel);
-		return indentLength + inClauseContent.Length > 120;
-	}
-
-	private static bool ShouldUseExpressionFallback(string sql)
-	{
-		if (string.IsNullOrWhiteSpace(sql))
-		{
-			return false;
-		}
-
-		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
-		if (normalized.Length == 0)
-		{
-			return false;
-		}
-
-		if (normalized.EndsWith(";", StringComparison.Ordinal))
-		{
-			return false;
-		}
-
-		var disallowedStarts = new[]
-		{
-			"SELECT",
-			"INSERT",
-			"UPDATE",
-			"DELETE",
-			"MERGE",
-			"CREATE",
-			"ALTER",
-			"DROP",
-			"TRUNCATE",
-			"DECLARE",
-			"SET",
-			"EXEC",
-			"EXECUTE",
-			"ELSE",
-			"BEGIN",
-			"END",
-			"WITH"
-		};
-
-		for (var i = 0; i < disallowedStarts.Length; i++)
-		{
-			if (normalized.StartsWith(disallowedStarts[i], StringComparison.OrdinalIgnoreCase))
-			{
-				return false;
-			}
-		}
-
-		return normalized.Contains('(') && normalized.Contains(')');
-	}
-
-	private static bool TryExtractSimpleSelectAssignment(string sql, out string prefix, out string expression, out bool hasSemicolon)
-	{
-		prefix = string.Empty;
-		expression = string.Empty;
-		hasSemicolon = false;
-
-		if (string.IsNullOrWhiteSpace(sql))
-		{
-			return false;
-		}
-
-		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
-		if (!normalized.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
-		{
-			return false;
-		}
-
-		if (System.Text.RegularExpressions.Regex.IsMatch(normalized, @"\bFROM\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-		{
-			return false;
-		}
-
-		hasSemicolon = normalized.EndsWith(";", StringComparison.Ordinal);
-		if (hasSemicolon)
-		{
-			normalized = normalized[..^1].TrimEnd();
-		}
-
-		var equalsIndex = normalized.IndexOf("=", StringComparison.Ordinal);
-		if (equalsIndex < 0)
-		{
-			return false;
-		}
-
-		var left = normalized[..equalsIndex].TrimEnd();
-		var right = normalized[(equalsIndex + 1)..].TrimStart();
-		if (!left.StartsWith("SELECT @", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(right))
-		{
-			return false;
-		}
-
-		prefix = left["SELECT ".Length..] + " = ";
-		expression = right;
-		return true;
-	}
-
 	private static string ComposeSelectAssignment(string prefix, string formattedExpression, bool hasSemicolon)
 	{
 		if (string.IsNullOrEmpty(formattedExpression))
@@ -1828,98 +1401,48 @@ public sealed class SqlCanonicalizationService
 		return sb.ToString();
 	}
 
-	private static bool TryFormatSimpleSelectWhereNoFrom(string sql, out string formatted)
+	private static int FindMatchingParenthesis(string expression, int leftParenthesisIndex)
 	{
-		formatted = string.Empty;
-		if (string.IsNullOrWhiteSpace(sql))
+		var depth = 0;
+		for (var i = leftParenthesisIndex; i < expression.Length; i++)
 		{
-			return false;
-		}
-
-		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
-		if (!normalized.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
-		{
-			return false;
-		}
-
-		if (normalized.Contains(" FROM ", StringComparison.OrdinalIgnoreCase))
-		{
-			return false;
-		}
-
-		var whereIndex = normalized.IndexOf(" WHERE ", StringComparison.OrdinalIgnoreCase);
-		if (whereIndex < 0)
-		{
-			return false;
-		}
-
-		var selectValue = normalized["SELECT ".Length..whereIndex].Trim();
-		if (string.IsNullOrEmpty(selectValue))
-		{
-			return false;
-		}
-
-		var wherePredicate = normalized[(whereIndex + " WHERE ".Length)..].Trim();
-		var hasSemicolon = wherePredicate.EndsWith(";", StringComparison.Ordinal);
-		if (hasSemicolon)
-		{
-			wherePredicate = wherePredicate[..^1].TrimEnd();
-		}
-
-		const string betweenToken = " BETWEEN ";
-		const string andToken = " AND ";
-		var betweenIndex = wherePredicate.IndexOf(betweenToken, StringComparison.OrdinalIgnoreCase);
-		var andIndex = betweenIndex >= 0 ? wherePredicate.IndexOf(andToken, betweenIndex + betweenToken.Length, StringComparison.OrdinalIgnoreCase) : -1;
-
-		var sb = new StringBuilder();
-		sb.Append("SELECT");
-		sb.AppendLine();
-		sb.Append('\t');
-		sb.Append(selectValue);
-		sb.AppendLine();
-		sb.Append("WHERE ");
-
-		if (betweenIndex >= 0 && andIndex > betweenIndex)
-		{
-			var left = wherePredicate[..andIndex].TrimEnd();
-			var right = wherePredicate[(andIndex + andToken.Length)..].Trim();
-			var rightLength = right.Length;
-			sb.Append(left);
-			sb.Append(" AND");
-
-			if (rightLength > LongExpressionLineBreakThreshold)
+			if (expression[i] == '(')
 			{
-				var formattedRight = FormatExpressionFallback(right, LongExpressionLineBreakThreshold).Replace("\r\n", "\n");
-				var rightLines = formattedRight.Split('\n');
-				sb.AppendLine();
-				for (var i = 0; i < rightLines.Length; i++)
+				depth++;
+			}
+			else if (expression[i] == ')')
+			{
+				depth--;
+				if (depth == 0)
 				{
-					sb.Append('\t');
-					sb.Append(rightLines[i]);
-					if (i < rightLines.Length - 1)
-					{
-						sb.AppendLine();
-					}
+					return i;
 				}
 			}
-			else
+		}
+
+		return -1;
+	}
+
+	private static int FindMatchingRightParenthesisIndex(IList<TSqlParserToken> tokens, int leftParenthesisIndex)
+	{
+		var depth = 0;
+		for (var i = leftParenthesisIndex; i < tokens.Count; i++)
+		{
+			if (tokens[i].TokenType == TSqlTokenType.LeftParenthesis)
 			{
-				sb.Append(' ');
-				sb.Append(right);
+				depth++;
+			}
+			else if (tokens[i].TokenType == TSqlTokenType.RightParenthesis)
+			{
+				depth--;
+				if (depth == 0)
+				{
+					return i;
+				}
 			}
 		}
-		else
-		{
-			sb.Append(wherePredicate);
-		}
 
-		if (hasSemicolon)
-		{
-			sb.Append(';');
-		}
-
-		formatted = sb.ToString().Replace("' decimal '", "'  decimal  '", StringComparison.Ordinal);
-		return true;
+		return -1;
 	}
 
 	private static string FormatExpressionFallback(string expression, int threshold)
@@ -1973,7 +1496,7 @@ public sealed class SqlCanonicalizationService
 						var previousNonWhitespaceChar = PreviousNonWhitespaceCharInText(result);
 
 						indentLevel = Math.Max(0, indentLevel - 1);
-						if (isExpressionEnd && previousNonWhitespaceChar != ')' )
+						if (isExpressionEnd && previousNonWhitespaceChar != ')')
 						{
 							result.Append(c);
 							lineStart = false;
@@ -2072,39 +1595,106 @@ public sealed class SqlCanonicalizationService
 		return result.ToString().TrimEnd();
 	}
 
-	private static bool ShouldExpandParenthesisInExpression(string expression, int leftParenthesisIndex, int threshold)
+	private static void FormatInClauseMultiline(StringBuilder result, string inClauseContent, int indentLevel)
 	{
-		var closeIndex = FindMatchingParenthesis(expression, leftParenthesisIndex);
-		if (closeIndex <= leftParenthesisIndex)
+		var startParen = inClauseContent.IndexOf('(');
+		if (startParen < 0)
 		{
-			return false;
+			result.Append(inClauseContent);
+			return;
 		}
 
-		var content = expression[(leftParenthesisIndex + 1)..closeIndex].Trim();
-		if (content.Length <= threshold)
+		var prefix = inClauseContent[..(startParen + 1)].Trim();
+		result.Append(prefix);
+		result.AppendLine();
+
+		var valuesPart = inClauseContent[(startParen + 1)..].Trim().TrimEnd(')');
+		var values = valuesPart
+			.Split([','], StringSplitOptions.RemoveEmptyEntries)
+			.Select(value => value.Trim())
+			.ToList();
+
+		var indent = new string('\t', indentLevel + 1);
+		var currentLine = new StringBuilder();
+
+		foreach (var value in values)
 		{
-			return false;
+			var separatorLength = currentLine.Length > 0 ? 2 : 0;
+			if (currentLine.Length > 0 && indent.Length + currentLine.Length + separatorLength + value.Length > 120)
+			{
+				result.Append(indent);
+				result.Append(currentLine);
+				result.AppendLine();
+				currentLine.Clear();
+			}
+
+			if (currentLine.Length > 0)
+			{
+				currentLine.Append(", ");
+			}
+
+			currentLine.Append(value);
 		}
 
-		var depth = 0;
-		for (var i = 0; i < content.Length; i++)
+		if (currentLine.Length > 0)
 		{
-			var c = content[i];
-			if (c == '(')
-			{
-				depth++;
-			}
-			else if (c == ')')
-			{
-				depth = Math.Max(0, depth - 1);
-			}
-			else if (depth == 0 && (c == ',' || c == '='))
-			{
-				return true;
-			}
+			result.Append(indent);
+			result.Append(currentLine);
+			result.AppendLine();
 		}
 
-		return false;
+		result.Append(new string('\t', Math.Max(0, indentLevel)));
+		result.Append(')');
+	}
+
+	private static int GetActiveExpandedParenthesisDepth(Stack<ParenthesisScope> parenthesisStack)
+	{
+		return parenthesisStack.Count;
+	}
+
+	private static int GetContentIndent(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool inSelectColumnList, int selectStatementDepth)
+	{
+		var extraIndent = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
+		extraIndent += GetActiveExpandedParenthesisDepth(parenthesisStack);
+		return indentLevel + extraIndent;
+	}
+
+	private static int GetColumnListIndent(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool inSelectColumnList, int selectStatementDepth, bool inCreateStatementParams, bool inInsertColumnList, bool afterCreateObjectName, bool inUpdateSetClause)
+	{
+		var extraIndent = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
+		if ((inCreateStatementParams || inInsertColumnList) && !afterCreateObjectName)
+		{
+			extraIndent = 1;
+		}
+		else
+		{
+			extraIndent += GetActiveExpandedParenthesisDepth(parenthesisStack);
+		}
+
+		if (inUpdateSetClause)
+		{
+			extraIndent++;
+		}
+
+		return indentLevel + extraIndent;
+	}
+
+	private static int GetClauseIndentForContext(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool isInClauseScope)
+	{
+		var indent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
+		return isInClauseScope ? indent + 2 : indent;
+	}
+
+	private static int GetClosingParenIndentForContext(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool inValuesList, int parenthesisDepth, int valuesListDepth, TSqlTokenType? nextTokenType)
+	{
+		var indent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
+		if (inValuesList && parenthesisDepth > valuesListDepth)
+		{
+			var closingDedent = nextTokenType == TSqlTokenType.Comma ? 8 : 6;
+			indent = Math.Max(0, indent - closingDedent);
+		}
+
+		return indent;
 	}
 
 	private static int GetCurrentLineLengthInText(StringBuilder result)
@@ -2120,17 +1710,53 @@ public sealed class SqlCanonicalizationService
 		return result.Length;
 	}
 
-	private static char PreviousNonWhitespaceCharInText(StringBuilder result)
+	private static string GetCurrentLineText(StringBuilder result)
 	{
 		for (var i = result.Length - 1; i >= 0; i--)
 		{
-			if (!char.IsWhiteSpace(result[i]))
+			if (result[i] == '\n')
 			{
-				return result[i];
+				return result.ToString(i + 1, result.Length - i - 1);
 			}
 		}
 
-		return '\0';
+		return result.ToString();
+	}
+
+	private static int GetDeclarationContinuationIndent(bool isVariableToken)
+	{
+		return isVariableToken ? 4 : 0;
+	}
+
+	private static int GetExpressionLengthUntilClauseBoundary(IList<TSqlParserToken> tokens, int startIndex)
+	{
+		var length = 0;
+		for (var i = startIndex; i < tokens.Count; i++)
+		{
+			var token = tokens[i];
+			if (token.TokenType == TSqlTokenType.WhiteSpace)
+			{
+				if (length > 0)
+				{
+					length++;
+				}
+				continue;
+			}
+
+			if (token.TokenType == TSqlTokenType.EndOfFile || IsClauseBoundaryToken(token.TokenType))
+			{
+				break;
+			}
+
+			if (string.IsNullOrEmpty(token.Text))
+			{
+				continue;
+			}
+
+			length += token.Text.Length;
+		}
+
+		return length;
 	}
 
 	private static int GetNextExpressionSegmentLength(string expression, int startIndex, int currentDepth)
@@ -2184,26 +1810,285 @@ public sealed class SqlCanonicalizationService
 		return length;
 	}
 
-	private static int FindMatchingParenthesis(string expression, int leftParenthesisIndex)
+	private static int GetNextTopLevelArgumentLength(IList<TSqlParserToken> tokens, int startIndex, int currentParenthesisDepth)
 	{
-		var depth = 0;
-		for (var i = leftParenthesisIndex; i < expression.Length; i++)
+		var depth = currentParenthesisDepth;
+		var length = 0;
+		var seenNonWhitespace = false;
+
+		for (var i = startIndex; i < tokens.Count; i++)
 		{
-			if (expression[i] == '(')
+			var token = tokens[i];
+			if (token.TokenType == TSqlTokenType.LeftParenthesis)
 			{
 				depth++;
+				length += token.Text.Length;
+				seenNonWhitespace = true;
+				continue;
 			}
-			else if (expression[i] == ')')
+
+			if (token.TokenType == TSqlTokenType.RightParenthesis)
 			{
-				depth--;
-				if (depth == 0)
+				if (depth == currentParenthesisDepth)
 				{
-					return i;
+					break;
 				}
+
+				depth--;
+				length += token.Text.Length;
+				seenNonWhitespace = true;
+				continue;
+			}
+
+			if (depth == currentParenthesisDepth && token.TokenType == TSqlTokenType.Comma)
+			{
+				break;
+			}
+
+			if (token.TokenType == TSqlTokenType.WhiteSpace)
+			{
+				if (seenNonWhitespace)
+				{
+					length++;
+				}
+				continue;
+			}
+
+			length += token.Text.Length;
+			seenNonWhitespace = true;
+		}
+
+		return length;
+	}
+
+	private static int GetOperatorContinuationIndent(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool inSelectColumnList, int selectStatementDepth, bool inInClause)
+	{
+		var activeDepth = GetActiveExpandedParenthesisDepth(parenthesisStack);
+		if (activeDepth == 0)
+		{
+			return indentLevel + (inInClause ? 2 : 1);
+		}
+
+		var selectExtra = inSelectColumnList && selectStatementDepth > 0 ? 1 : 0;
+		var baseIndent = indentLevel + selectExtra + activeDepth;
+		return inInClause ? baseIndent + 1 : baseIndent;
+	}
+
+	private static int GetSelectIndentForContext(int indentLevel, Stack<ParenthesisScope> parenthesisStack, bool isLeftParenInClause)
+	{
+		var indent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
+		return isLeftParenInClause ? indent + 2 : indent;
+	}
+
+	private static bool HasParenthesisScope(Stack<ParenthesisScope> parenthesisStack, int parenthesisDepth)
+	{
+		return parenthesisStack.Count > 0 && parenthesisStack.Peek().ParenthesisDepth == parenthesisDepth;
+	}
+
+	private static bool IsBetweenAndToken(IList<TSqlParserToken> tokens, int andIndex)
+	{
+		var depth = 0;
+		for (var i = andIndex - 1; i >= 0; i--)
+		{
+			var token = tokens[i];
+			if (token.TokenType == TSqlTokenType.RightParenthesis)
+			{
+				depth++;
+				continue;
+			}
+
+			if (token.TokenType == TSqlTokenType.LeftParenthesis)
+			{
+				depth = Math.Max(0, depth - 1);
+				continue;
+			}
+
+			if (token.TokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (depth > 0)
+			{
+				continue;
+			}
+
+			if (token.TokenType == TSqlTokenType.Between)
+			{
+				return true;
+			}
+
+			if (IsClauseBoundaryToken(token.TokenType))
+			{
+				return false;
 			}
 		}
 
-		return -1;
+		return false;
+	}
+
+	private static bool IsBuiltInFunction(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.Coalesce or TSqlTokenType.NullIf;
+	}
+
+	private static bool IsClauseBoundaryToken(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.And or TSqlTokenType.Or or TSqlTokenType.Group or TSqlTokenType.Having or TSqlTokenType.Order or TSqlTokenType.Union or TSqlTokenType.Except or TSqlTokenType.Intersect or TSqlTokenType.From or TSqlTokenType.Where or TSqlTokenType.Semicolon
+			or TSqlTokenType.Join or TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Outer or TSqlTokenType.Cross or TSqlTokenType.Full;
+	}
+
+	private static bool IsInsideCaseBlock(IList<TSqlParserToken> tokens, int tokenIndex)
+	{
+		var depth = 0;
+		for (var i = tokenIndex - 1; i >= 0; i--)
+		{
+			var tokenType = tokens[i].TokenType;
+			if (tokenType == TSqlTokenType.RightParenthesis)
+			{
+				depth++;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.LeftParenthesis)
+			{
+				depth = Math.Max(0, depth - 1);
+				continue;
+			}
+
+			if (depth > 0 || tokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.Case)
+			{
+				return true;
+			}
+
+			if (tokenType is TSqlTokenType.End or TSqlTokenType.Semicolon)
+			{
+				return false;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool IsKeyword(TSqlTokenType tokenType)
+	{
+		return tokenType switch
+		{
+			TSqlTokenType.Select or
+			TSqlTokenType.From or
+			TSqlTokenType.Where or
+			TSqlTokenType.Insert or
+			TSqlTokenType.Update or
+			TSqlTokenType.Delete or
+			TSqlTokenType.Create or
+			TSqlTokenType.Alter or
+			TSqlTokenType.Drop or
+			TSqlTokenType.Proc or
+			TSqlTokenType.Procedure or
+			TSqlTokenType.Function or
+			TSqlTokenType.View or
+			TSqlTokenType.Trigger or
+			TSqlTokenType.Begin or
+			TSqlTokenType.End or
+			TSqlTokenType.If or
+			TSqlTokenType.Else or
+			TSqlTokenType.While or
+			TSqlTokenType.Return or
+			TSqlTokenType.Declare or
+			TSqlTokenType.Set or
+			TSqlTokenType.As or
+			TSqlTokenType.Join or
+			TSqlTokenType.Left or
+			TSqlTokenType.Right or
+			TSqlTokenType.Inner or
+			TSqlTokenType.Outer or
+			TSqlTokenType.Cross or
+			TSqlTokenType.Full or
+			TSqlTokenType.On or
+			TSqlTokenType.And or
+			TSqlTokenType.Or or
+			TSqlTokenType.Not or
+			TSqlTokenType.Null or
+			TSqlTokenType.Is or
+			TSqlTokenType.In or
+			TSqlTokenType.Between or
+			TSqlTokenType.Like or
+			TSqlTokenType.Exists or
+			TSqlTokenType.Case or
+			TSqlTokenType.When or
+			TSqlTokenType.Then or
+			TSqlTokenType.Order or
+			TSqlTokenType.By or
+			TSqlTokenType.Group or
+			TSqlTokenType.Having or
+			TSqlTokenType.Distinct or
+			TSqlTokenType.Top or
+			TSqlTokenType.With or
+			TSqlTokenType.Union or
+			TSqlTokenType.All or
+			TSqlTokenType.Into or
+			TSqlTokenType.Values or
+			TSqlTokenType.Table or
+			TSqlTokenType.Execute or
+			TSqlTokenType.Exec => true,
+			_ => false
+		};
+	}
+
+	private static bool IsOnlyClosingParenthesesLine(string line)
+	{
+		if (string.IsNullOrWhiteSpace(line))
+		{
+			return false;
+		}
+
+		for (var i = 0; i < line.Length; i++)
+		{
+			var c = line[i];
+			if (!char.IsWhiteSpace(c) && c != ')' && c != ',')
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static bool IsTryCatchFinallyToken(TSqlParserToken token)
+	{
+		return token.TokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier &&
+			(token.Text.Equals("TRY", StringComparison.OrdinalIgnoreCase) ||
+			token.Text.Equals("CATCH", StringComparison.OrdinalIgnoreCase) ||
+			token.Text.Equals("FINALLY", StringComparison.OrdinalIgnoreCase));
+	}
+
+	private static bool IsUpdateSetClause(IList<TSqlParserToken> tokens, int setIndex)
+	{
+		for (var i = setIndex - 1; i >= 0; i--)
+		{
+			var tokenType = tokens[i].TokenType;
+			if (tokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.Update)
+			{
+				return true;
+			}
+
+			if (tokenType is TSqlTokenType.Semicolon or TSqlTokenType.Go or TSqlTokenType.Begin or TSqlTokenType.End)
+			{
+				return false;
+			}
+		}
+
+		return false;
 	}
 
 	private static int NextNonWhitespaceCharIndex(string value, int startIndex)
@@ -2217,6 +2102,568 @@ public sealed class SqlCanonicalizationService
 		}
 
 		return -1;
+	}
+
+	private static int NextNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
+	{
+		var index = startIndex;
+		while (index < tokens.Count && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
+		{
+			index++;
+		}
+
+		return index;
+	}
+
+	private static string NormalizeSingleLineCommentBoundaries(string sql)
+	{
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return sql;
+		}
+
+		// Preserve comment content exactly; only normalize line endings for parser stability.
+		return sql.Replace("\r\n", "\n").Replace('\r', '\n');
+	}
+
+	private static void PopParenthesisScope(Stack<ParenthesisScope> parenthesisStack, int parenthesisDepth)
+	{
+		if (HasParenthesisScope(parenthesisStack, parenthesisDepth))
+		{
+			parenthesisStack.Pop();
+		}
+	}
+
+	private static char PreviousNonWhitespaceCharInText(StringBuilder result)
+	{
+		for (var i = result.Length - 1; i >= 0; i--)
+		{
+			if (!char.IsWhiteSpace(result[i]))
+			{
+				return result[i];
+			}
+		}
+
+		return '\0';
+	}
+
+	private static int PreviousNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
+	{
+		var index = startIndex;
+		while (index >= 0 && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
+		{
+			index--;
+		}
+
+		return index;
+	}
+
+	private static bool ShouldBreakAfterComma(bool inInsertColumnList, bool inValuesList, bool inCreateStatementParams, bool inSelectColumnList, int selectStatementDepth, int parenthesisDepth, Stack<ParenthesisScope> parenthesisStack, bool inInClause)
+	{
+		if (inInsertColumnList || inValuesList || inCreateStatementParams || (inSelectColumnList && selectStatementDepth > 0 && parenthesisDepth == 0))
+		{
+			return true;
+		}
+
+		return parenthesisDepth > 0 && HasParenthesisScope(parenthesisStack, parenthesisDepth) && !inInClause;
+	}
+
+	private static bool ShouldExpandParenthesisForDisplay(IList<TSqlParserToken> tokens, int leftParenthesisIndex)
+	{
+		var rightParenthesisIndex = FindMatchingRightParenthesisIndex(tokens, leftParenthesisIndex);
+		if (rightParenthesisIndex <= leftParenthesisIndex)
+		{
+			return false;
+		}
+
+		var flatLength = 0;
+		for (var i = leftParenthesisIndex; i <= rightParenthesisIndex; i++)
+		{
+			var token = tokens[i];
+			if (token.TokenType == TSqlTokenType.WhiteSpace)
+			{
+				if (flatLength > 0)
+				{
+					flatLength++;
+				}
+				continue;
+			}
+
+			flatLength += token.Text.Length;
+		}
+
+		return flatLength > LongExpressionLineBreakThreshold;
+	}
+
+	private static bool ShouldExpandParenthesisInExpression(string expression, int leftParenthesisIndex, int threshold)
+	{
+		var closeIndex = FindMatchingParenthesis(expression, leftParenthesisIndex);
+		if (closeIndex <= leftParenthesisIndex)
+		{
+			return false;
+		}
+
+		var content = expression[(leftParenthesisIndex + 1)..closeIndex].Trim();
+		if (content.Length <= threshold)
+		{
+			return false;
+		}
+
+		var depth = 0;
+		for (var i = 0; i < content.Length; i++)
+		{
+			var c = content[i];
+			if (c == '(')
+			{
+				depth++;
+			}
+			else if (c == ')')
+			{
+				depth = Math.Max(0, depth - 1);
+			}
+			else if (depth == 0 && (c == ',' || c == '='))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool ShouldFormatInClauseMultiline(string inClauseContent, int indentLevel)
+	{
+		var indentLength = Math.Max(0, indentLevel);
+		return indentLength + inClauseContent.Length > 120;
+	}
+
+	private static bool ShouldKeepSelectInline(IList<TSqlParserToken> tokens, int selectIndex)
+	{
+		var parenthesisDepth = 0;
+		var caseDepth = 0;
+		var hasTopLevelProjectionToken = false;
+		var hasTopLevelProjectionComma = false;
+		var firstProjectionTokenType = TSqlTokenType.None;
+		for (var i = selectIndex + 1; i < tokens.Count; i++)
+		{
+			var tokenType = tokens[i].TokenType;
+			if (tokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.LeftParenthesis)
+			{
+				parenthesisDepth++;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.RightParenthesis)
+			{
+				parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+				continue;
+			}
+
+			if (parenthesisDepth > 0)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.Case)
+			{
+				caseDepth++;
+			}
+
+			if (!hasTopLevelProjectionToken)
+			{
+				firstProjectionTokenType = tokenType;
+			}
+
+			if (tokenType == TSqlTokenType.Comma)
+			{
+				hasTopLevelProjectionComma = true;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.From)
+			{
+				return hasTopLevelProjectionToken &&
+					!hasTopLevelProjectionComma &&
+					firstProjectionTokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier or TSqlTokenType.Variable;
+			}
+
+			if (tokenType == TSqlTokenType.End && caseDepth > 0)
+			{
+				caseDepth--;
+				hasTopLevelProjectionToken = true;
+				continue;
+			}
+
+			if (tokenType is TSqlTokenType.Semicolon or TSqlTokenType.Go or TSqlTokenType.End)
+			{
+				return hasTopLevelProjectionToken && !hasTopLevelProjectionComma;
+			}
+
+			if (tokenType is TSqlTokenType.Where or TSqlTokenType.Group or TSqlTokenType.Order or TSqlTokenType.Having or TSqlTokenType.Join or TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Full or TSqlTokenType.Cross or TSqlTokenType.Union)
+			{
+				return false;
+			}
+
+			hasTopLevelProjectionToken = true;
+		}
+
+		return false;
+	}
+
+	private static bool ShouldKeepSelectInlineInParenthesizedSubquery(IList<TSqlParserToken> tokens, int selectIndex)
+	{
+		var parenthesisDepth = 0;
+		var caseDepth = 0;
+		var hasTopLevelProjectionToken = false;
+		var hasTopLevelProjectionComma = false;
+		for (var i = selectIndex + 1; i < tokens.Count; i++)
+		{
+			var tokenType = tokens[i].TokenType;
+			if (tokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.LeftParenthesis)
+			{
+				parenthesisDepth++;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.RightParenthesis)
+			{
+				parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+				continue;
+			}
+
+			if (parenthesisDepth > 0)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.Case)
+			{
+				caseDepth++;
+			}
+
+			if (tokenType == TSqlTokenType.Comma)
+			{
+				hasTopLevelProjectionComma = true;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.From && hasTopLevelProjectionToken && !hasTopLevelProjectionComma)
+			{
+				return true;
+			}
+
+			if (tokenType == TSqlTokenType.End && caseDepth > 0)
+			{
+				caseDepth--;
+				hasTopLevelProjectionToken = true;
+				continue;
+			}
+
+			if (tokenType is TSqlTokenType.Semicolon or TSqlTokenType.Go or TSqlTokenType.End or TSqlTokenType.Where or TSqlTokenType.Group or TSqlTokenType.Order or TSqlTokenType.Having or TSqlTokenType.Join or TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Full or TSqlTokenType.Cross or TSqlTokenType.Union)
+			{
+				return false;
+			}
+
+			hasTopLevelProjectionToken = true;
+		}
+
+		return false;
+	}
+
+	private static bool ShouldUseExpressionFallback(string sql)
+	{
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return false;
+		}
+
+		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
+		if (normalized.Length == 0)
+		{
+			return false;
+		}
+
+		if (normalized.EndsWith(";", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var disallowedStarts = new[]
+		{
+			"SELECT",
+			"INSERT",
+			"UPDATE",
+			"DELETE",
+			"MERGE",
+			"CREATE",
+			"ALTER",
+			"DROP",
+			"TRUNCATE",
+			"DECLARE",
+			"SET",
+			"EXEC",
+			"EXECUTE",
+			"ELSE",
+			"BEGIN",
+			"END",
+			"WITH"
+		};
+
+		for (var i = 0; i < disallowedStarts.Length; i++)
+		{
+			if (normalized.StartsWith(disallowedStarts[i], StringComparison.OrdinalIgnoreCase))
+			{
+				return false;
+			}
+		}
+
+		return normalized.Contains('(') && normalized.Contains(')');
+	}
+
+	private static bool StartsOnNewLine(TSqlTokenType tokenType)
+	{
+		return tokenType is
+			TSqlTokenType.Select or
+			TSqlTokenType.From or
+			TSqlTokenType.Where or
+			TSqlTokenType.Order or
+			TSqlTokenType.Group or
+			TSqlTokenType.Having or
+			TSqlTokenType.Union or
+			TSqlTokenType.Into or
+			TSqlTokenType.Values or
+			TSqlTokenType.Left or
+			TSqlTokenType.Right or
+			TSqlTokenType.Inner or
+			TSqlTokenType.Outer or
+			TSqlTokenType.Cross or
+			TSqlTokenType.Full or
+			TSqlTokenType.And or
+			TSqlTokenType.Or or
+			TSqlTokenType.Begin or
+			TSqlTokenType.End or
+			TSqlTokenType.Else or
+			TSqlTokenType.Go;
+	}
+
+	private static void TrimTrailingSpaces(StringBuilder result)
+	{
+		while (result.Length > 0 && result[^1] == ' ')
+		{
+			result.Length--;
+		}
+	}
+
+	private static bool TryExtractSimpleSelectAssignment(string sql, out string prefix, out string expression, out bool hasSemicolon)
+	{
+		prefix = string.Empty;
+		expression = string.Empty;
+		hasSemicolon = false;
+
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return false;
+		}
+
+		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
+		if (!normalized.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		if (System.Text.RegularExpressions.Regex.IsMatch(normalized, @"\bFROM\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return false;
+		}
+
+		hasSemicolon = normalized.EndsWith(";", StringComparison.Ordinal);
+		if (hasSemicolon)
+		{
+			normalized = normalized[..^1].TrimEnd();
+		}
+
+		var equalsIndex = normalized.IndexOf("=", StringComparison.Ordinal);
+		if (equalsIndex < 0)
+		{
+			return false;
+		}
+
+		var left = normalized[..equalsIndex].TrimEnd();
+		var right = normalized[(equalsIndex + 1)..].TrimStart();
+		if (!left.StartsWith("SELECT @", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(right))
+		{
+			return false;
+		}
+
+		prefix = left["SELECT ".Length..] + " = ";
+		expression = right;
+		return true;
+	}
+
+	private static bool TryFormatCollapsedTryCatchFinally(string sql, out string formatted)
+	{
+		formatted = string.Empty;
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return false;
+		}
+
+		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
+		const string beginTry = "BEGIN TRY ";
+		const string endTryBeginCatch = " END TRY BEGIN CATCH ";
+		const string endCatchBeginFinally = " END CATCH BEGIN FINALLY ";
+		const string endSuffix = " END";
+
+		if (!normalized.StartsWith(beginTry, StringComparison.OrdinalIgnoreCase) ||
+			!normalized.Contains(endTryBeginCatch, StringComparison.OrdinalIgnoreCase) ||
+			!normalized.Contains(endCatchBeginFinally, StringComparison.OrdinalIgnoreCase) ||
+			!normalized.EndsWith(endSuffix, StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		var tryStart = beginTry.Length;
+		var endTryIndex = normalized.IndexOf(endTryBeginCatch, StringComparison.OrdinalIgnoreCase);
+		if (endTryIndex <= tryStart)
+		{
+			return false;
+		}
+
+		var catchStart = endTryIndex + endTryBeginCatch.Length;
+		var endCatchIndex = normalized.IndexOf(endCatchBeginFinally, catchStart, StringComparison.OrdinalIgnoreCase);
+		if (endCatchIndex <= catchStart)
+		{
+			return false;
+		}
+
+		var finallyStart = endCatchIndex + endCatchBeginFinally.Length;
+		var endIndex = normalized.Length - endSuffix.Length;
+		if (endIndex <= finallyStart)
+		{
+			return false;
+		}
+
+		var tryBody = normalized[tryStart..endTryIndex].Trim();
+		var catchBody = normalized[catchStart..endCatchIndex].Trim();
+		var finallyBody = normalized[finallyStart..endIndex].Trim();
+
+		formatted = string.Join(Environment.NewLine,
+		[
+			"BEGIN TRY",
+			$"\t{tryBody}",
+			"END TRY",
+			"BEGIN CATCH",
+			$"\t{catchBody}",
+			"END CATCH",
+			"BEGIN FINALLY",
+			$"\t{finallyBody}",
+			"END"
+		]);
+
+		return true;
+	}
+
+	private static bool TryFormatSimpleSelectWhereNoFrom(string sql, out string formatted)
+	{
+		formatted = string.Empty;
+		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return false;
+		}
+
+		var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
+		if (!normalized.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		if (normalized.Contains(" FROM ", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		var whereIndex = normalized.IndexOf(" WHERE ", StringComparison.OrdinalIgnoreCase);
+		if (whereIndex < 0)
+		{
+			return false;
+		}
+
+		var selectValue = normalized["SELECT ".Length..whereIndex].Trim();
+		if (string.IsNullOrEmpty(selectValue))
+		{
+			return false;
+		}
+
+		var wherePredicate = normalized[(whereIndex + " WHERE ".Length)..].Trim();
+		var hasSemicolon = wherePredicate.EndsWith(";", StringComparison.Ordinal);
+		if (hasSemicolon)
+		{
+			wherePredicate = wherePredicate[..^1].TrimEnd();
+		}
+
+		const string betweenToken = " BETWEEN ";
+		const string andToken = " AND ";
+		var betweenIndex = wherePredicate.IndexOf(betweenToken, StringComparison.OrdinalIgnoreCase);
+		var andIndex = betweenIndex >= 0 ? wherePredicate.IndexOf(andToken, betweenIndex + betweenToken.Length, StringComparison.OrdinalIgnoreCase) : -1;
+
+		var sb = new StringBuilder();
+		sb.Append("SELECT");
+		sb.AppendLine();
+		sb.Append('\t');
+		sb.Append(selectValue);
+		sb.AppendLine();
+		sb.Append("WHERE ");
+
+		if (betweenIndex >= 0 && andIndex > betweenIndex)
+		{
+			var left = wherePredicate[..andIndex].TrimEnd();
+			var right = wherePredicate[(andIndex + andToken.Length)..].Trim();
+			var rightLength = right.Length;
+			sb.Append(left);
+			sb.Append(" AND");
+
+			if (rightLength > LongExpressionLineBreakThreshold)
+			{
+				var formattedRight = FormatExpressionFallback(right, LongExpressionLineBreakThreshold).Replace("\r\n", "\n");
+				var rightLines = formattedRight.Split('\n');
+				sb.AppendLine();
+				for (var i = 0; i < rightLines.Length; i++)
+				{
+					sb.Append('\t');
+					sb.Append(rightLines[i]);
+					if (i < rightLines.Length - 1)
+					{
+						sb.AppendLine();
+					}
+				}
+			}
+			else
+			{
+				sb.Append(' ');
+				sb.Append(right);
+			}
+		}
+		else
+		{
+			sb.Append(wherePredicate);
+		}
+
+		if (hasSemicolon)
+		{
+			sb.Append(';');
+		}
+
+		formatted = sb.ToString().Replace("' decimal '", "'  decimal  '", StringComparison.Ordinal);
+		return true;
 	}
 
 	private readonly struct ParenthesisScope

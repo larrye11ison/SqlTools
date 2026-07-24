@@ -20,7 +20,7 @@
             <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
                 <TextBlock Grid.Row="0"
                            Grid.Column="0"
-                           Text="{Binding Title}" 
+                           Text="{Binding Title}"
                            FontWeight="SemiBold"
                            FontSize="14"
                            VerticalAlignment="Center"/>
@@ -42,9 +42,13 @@
                                VerticalAlignment="Center"
                                FontWeight="SemiBold"/>
 
+                    <Button Command="{Binding ShowScriptDomDefaultCommand}"
+                            Content="ScriptDom Default"
+                            IsEnabled="{Binding !IsShowingScriptDomDefault}" />
+
                     <Button Command="{Binding ShowOriginalCommand}"
                             Content="Original"
-                            IsEnabled="{Binding IsShowingFormatted}" />
+                            IsEnabled="{Binding !IsShowingOriginal}" />
 
                     <Button Command="{Binding ShowFormattedCommand}"
                             Content="Formatted"
@@ -62,8 +66,8 @@
         </Border>
 
         <editor:TextEditor x:Name="Editor"
-                           FontFamily="Cascadia Code,Cascadia Mono,Consolas,Courier New"
-                           FontSize="14"
+                           FontFamily="Aporetic Serif"
+                           FontSize="16"
                            IsReadOnly="True"
                            ShowLineNumbers="True"
                            WordWrap="False"

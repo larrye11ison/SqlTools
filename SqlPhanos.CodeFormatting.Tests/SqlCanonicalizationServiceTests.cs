@@ -1,3 +1,4 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using System;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,202 @@ public sealed class SqlCanonicalizationServiceTests
 	public SqlCanonicalizationServiceTests(ITestOutputHelper output) => _output = output;
 
 	[Fact]
+	public void CreateProcedureWithBracketedNameAndNoBeginEndBody()
+	{
+		// CREATE PROCEDURE with a bracketed multi-part name and no parameters, whose body is a
+		// flat sequence of statements directly after AS (no BEGIN/END wrapper) - a common, valid,
+		// but distinct style from the BEGIN/END-wrapped procedures covered elsewhere.
+		var expected = """
+			CREATE OR ALTER PROCEDURE [dbo].[MyProc]
+			AS
+			SELECT 1;
+			SELECT 2;
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void BasicMultiColumnUpdateFormattedCorrectly()
+	{
+		// UPDATE ... SET col1 = v1, col2 = v2 WHERE ... was not covered by any existing test.
+		var expected = """
+			UPDATE Asset_Detail
+			SET
+				INGOMAR_MARK_DESC = 'Paid',
+				INGOMAR_MARK = 4
+			WHERE ISNULL(PrincipalBal, 0) = 0
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void UpdateFromJoinWithNolockHintAndNotInSubqueryFormattedCorrectly()
+	{
+		// UPDATE ... SET ... FROM ... INNER JOIN with an old-style (no WITH) table hint, plus a
+		// WHERE ... NOT IN (subquery) whose own FROM also carries a hint glued directly to the
+		// table name (no space) - all distinct from the simpler literal-list IN clause tests.
+		var expected = """
+			UPDATE Asset_Detail
+			SET
+				MARK = 1,
+				MARK_CODE = 'REMIC'
+			FROM Asset_Detail AD
+			INNER JOIN ParticipationMasterHist PMH (NOLOCK) ON PMH.LoanID = AD.LoanId
+				AND PMH.DATA_DATE = AD.DATA_DATE
+			WHERE PMH.RecordTypeID = '6'
+				AND AD.InvestorId NOT IN
+				(
+					SELECT INVESTOR_ID
+					FROM SNMLT_INVESTOR(NOLOCK)
+				)
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void MultiCteWithInsertIntoFormattedCorrectly()
+	{
+		// A multi-CTE WITH clause (two named subqueries chained by comma), each containing its
+		// own JOIN/GROUP BY/HAVING, followed by INSERT INTO ... SELECT FROM the second CTE.
+		// Regression coverage: a JOIN nested inside a CTE's parenthesized body was losing its
+		// indentation entirely (landing at column 0 instead of matching FROM).
+		var expected = """
+			WITH histWithUpb AS (
+				SELECT
+					[h].[LoanID],
+					MAX([TransactionDate]) AS [LastActiveDate]
+				FROM Service.dbo.History h
+				INNER JOIN Service.dbo.Loan l ON l.LoanID = h.LoanID
+				GROUP BY [h].[LoanID]
+				HAVING MAX([TransactionDate]) <= @lastOfPreviousMonth
+				), histWithoutUpb AS (
+				SELECT
+					[h].[LoanID],
+					MIN([TransactionDate]) AS [FirstNotActiveDate]
+				FROM Service.dbo.History h
+				INNER JOIN histWithUpb u ON u.LoanID = h.LoanID
+				GROUP BY [h].[LoanID]
+				)
+			INSERT INTO #closedLoans
+			SELECT
+				[LoanID],
+				[FirstNotActiveDate]
+			FROM histWithoutUpb;
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void RowNumberOverPartitionByWithBracketedAliasAssignmentFormattedCorrectly()
+	{
+		// ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...) using the "[alias] = expr" column
+		// syntax instead of "expr AS [alias]". Regression coverage: ORDER BY inside an OVER(...)
+		// window clause was being treated as the enclosing statement's own ORDER BY - closing the
+		// select column list early and losing a level of indentation relative to PARTITION BY.
+		var expected = """
+			SELECT
+				[lfb].[LoanID],
+				[RowId] = ROW_NUMBER() OVER (
+					PARTITION BY [lfb].[LoanID],
+					[lfb].[SubCode]
+					ORDER BY [lfb].[DataDate] DESC
+				)
+			FROM Miser.dbo.LoanFeeBalancesHistory lfb
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void SimpleSwitchStyleCaseAsSoleSelectColumnFormattedCorrectly()
+	{
+		// The "simple"/switch-style CASE (CASE input_expr WHEN value THEN ...), as distinct from
+		// the searched CASE (CASE WHEN predicate THEN ...) covered elsewhere. Regression coverage:
+		// when this CASE was the sole/first SELECT column, its own END was mistaken for a
+		// statement-terminating boundary, which suppressed the select-column-list indent and left
+		// CASE (and END) sitting at column 0 instead of matching sibling columns.
+		var expected = """
+			SELECT
+				CASE ad.OccupancyStatus
+					WHEN 'Owner Occupied' THEN 'Owner Occupied'
+					WHEN 'Vacant' THEN 'Vacant'
+					ELSE 'Unknown'
+				END AS OccupancyStatus
+			FROM Asset_Detail ad
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ReturnLabelAndRaiserrorAreSeparatedCorrectly()
+	{
+		// Regression test: RETURN, a GOTO label, and RAISERROR had no dedicated line-break
+		// handling, so a newline in the source between them (rather than a space) vanished
+		// entirely, gluing tokens together with zero separation (e.g. "OFFRETURN",
+		// "@intErrErrorHandler:", ")WITH").
+		var expected = """
+			SET NOCOUNT OFF
+			RETURN @intErr
+			ErrorHandler:
+			SET NOCOUNT OFF
+			RAISERROR ('%s. Error Number = %d', 11, 1, @chvErrMessage, @intErr) WITH SETERROR
+			GO
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void LeadingCommaAfterCommentStaysIndented()
+	{
+		// Regression test: in leading-comma style, a single-line comment between a column
+		// definition and its following ", nextColumn" left the comma stranded at column 0
+		// instead of indented at the column-list level.
+		var expected = """
+			CREATE TABLE #gseLoans (
+				[LoanID] VARCHAR(12) PRIMARY KEY CLUSTERED,
+				[MonthEndPrinAmount] MONEY,
+				[UPBShortFall] MONEY
+				-- Extra data (from AD2.. but StepRate is not captured historically)
+				,
+				[StepRate1Date] DATE NULL,
+				[StepRate2Date] DATE NULL
+			);
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void CreateTableColumnsEachOnOwnLine()
+	{
+		// CREATE TABLE column lists always break one column per line, like CREATE PROCEDURE
+		// parameter lists do, rather than packing multiple short columns onto one line.
+		var expected = """
+			CREATE TABLE #gseLoans (
+				[LoanID] VARCHAR(12) PRIMARY KEY CLUSTERED,
+				[MonthEndPrinAmount] MONEY,
+				[MonthStartPrinAmount] MONEY,
+				[AquiredUPB] MONEY,
+				[UPBShortFall] MONEY,
+				[StepRate1Date] DATE NULL,
+				[StepRate2Date] DATE NULL,
+				[StepRate3Date] DATE NULL,
+				[StepRate4Date] DATE NULL,
+				[StepRate5Date] DATE NULL,
+				[StepRate6Date] DATE NULL
+			);
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
 	public void BasicJoinFormattedCorrectly()
 	{
 		var expected = """
@@ -24,6 +221,28 @@ public sealed class SqlCanonicalizationServiceTests
 			FROM foo f
 			INNER JOIN bar b ON f.id = b.foo_id
 				AND f.status = 'active'
+			""";
+
+		RunFactTest(expected);
+	}
+
+
+
+	[Fact]
+	public void OuterApplyFormattedCorrectly()
+	{
+		var expected = """
+			SELECT
+				fb.LoanID,
+				fb.ReviewPmtPlanSubStatus,
+			FROM Core.dbo.LossMitigationForbearanceWorkflow fb
+			INNER JOIN #gseLoans l ON l.LoanID = fb.LoanID
+			OUTER APPLY 
+			(
+				SELECT
+					'A' AS Stud,
+					'B' AS TurdBurglar
+			) fmt;
 			""";
 
 		RunFactTest(expected);
@@ -39,6 +258,19 @@ public sealed class SqlCanonicalizationServiceTests
 			END
 			""";
 
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void CaseWhenElseEndFormattedCorrectly()
+	{
+		var expected = """
+			CASE
+				WHEN a = 1 THEN 'One'
+				WHEN a = 2 THEN 'Two'
+				ELSE 'Other'
+			END AS NumberText
+			""";
 		RunFactTest(expected);
 	}
 
@@ -126,6 +358,61 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void FullSuiteMBADelinquency()
+	{
+		string sql;
+		using (var reader = new StreamReader("CodeSamples/FullSuiteMBADelinquency.sql"))
+		{
+			sql = reader.ReadToEnd();
+		}
+
+		var formatted = service.FormatForDisplay(sql);
+		Assert.False(string.IsNullOrWhiteSpace(formatted));
+		_output.WriteLine("Here is the formatted output for FullSuiteMBADelinquency.sql:");
+		_output.WriteLine(formatted);
+	}
+
+	[Fact]
+	public void ArithmeticExpressionWithNestedCaseIndentsLogically()
+	{
+		// Regression test for the MBADaysDelinquent expression in FullSuiteMBADelinquency.sql:
+		// operator-joined terms that fit within the line-length threshold stay on their own
+		// line at the same indent, and each nested paren (including CASE...END, which behaves
+		// like an implicit paren for indentation purposes) indents its content one level deeper
+		// than the line that opened it, with the matching close aligned back to that opening line.
+		var expected = """
+			SELECT
+				ad.DueDate,
+				(
+					((DATEPART(YYYY, ad.DATA_DATE) - DATEPART(YYYY, ad.DueDate)) * 360) +
+					((DATEPART(MM, ad.DATA_DATE) - DATEPART(MM, ad.DueDate)) * 30) +
+					(
+						(
+							CASE
+								WHEN (
+									(DATEPART(MM, ad.DATA_DATE) = 2)
+									AND (DATEPART(DD, ad.DATA_DATE) IN (28, 29))
+								) THEN 30
+								WHEN DATEPART(DD, ad.DATA_DATE) >= 30 THEN 30
+								ELSE DATEPART(DD, ad.DATA_DATE)
+							END
+						) -
+						(
+							CASE
+								WHEN DATEPART(DD, ad.DueDate) >= 30 THEN 30
+								ELSE DATEPART(DD, ad.DueDate)
+							END
+						)
+					)
+				) + 1 AS MBADaysDelinquent,
+				NULL AS DelinquencyStringCode
+			FROM ASSET_DETAIL_DAILY ad;
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
 	public void FullSuiteSynthetic()
 	{
 		string expected;
@@ -139,18 +426,60 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
-	public void FullSuiteMBADelinquency()
+	public void IfElseWithBeginBlocksFormatCorrectly()
 	{
-		string sql;
-		using (var reader = new StreamReader("CodeSamples/FullSuiteMBADelinquency.sql"))
-		{
-			sql = reader.ReadToEnd();
-		}
+		var expected = """
+			IF(1 = 1)
+			BEGIN
+				PRINT 'hi';
+			END
+			ELSE
+			BEGIN
+				PRINT 'bye';
+			END
+			""";
 
-		var formatted = service.FormatForDisplay(sql);
-		Assert.False(string.IsNullOrWhiteSpace(formatted));
-		_output.WriteLine("Here is the formatted output for FullSuiteMBADelinquency.sql:");
-		_output.WriteLine(formatted);
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void InsertBasicFormattedCorrectly()
+	{
+		var expected = """
+			INSERT INTO foo
+			(
+				a,
+				b,
+				c
+			)
+			VALUES
+			(
+				'a',
+				'b',
+				'c'
+			)
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void InsertWithSelectFormattedCorrectly()
+	{
+		var expected = """
+			INSERT INTO foo
+			(
+				a,
+				b,
+				c
+			)
+			SELECT
+				a.One,
+				a.Two,
+				a.Three
+			FROM dbo.Blerg a
+			""";
+		RunFactTest(expected);
 	}
 
 	[Fact]
@@ -168,19 +497,51 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 
+	[Fact]
+	public void LeftOuterJoinFormattedCorrectly()
+	{
+		string sql = """
+			SELECT e.FirstName
+			FROM Employees e
+			LEFT OUTER JOIN Departments d ON e.DepartmentID = d.DepartmentID
+				AND d.DepartmentName = 'Sales'
+			WHERE e.EmployeeID IN (1, 2, 3)
+			""";
+
+		RunFactTest(sql);
+	}
 
 	[Fact]
-	public void IfElseWithBeginBlocksFormatCorrectly()
+	public void BareJoinStartsOnOwnLine()
 	{
+		// A bare JOIN (no INNER/LEFT/RIGHT/OUTER/CROSS/FULL modifier) must start its own
+		// line, just like every other join variant already does.
+		string sql = """
+			SELECT e.FirstName
+			FROM Employees e
+			JOIN Departments d ON e.DepartmentID = d.DepartmentID
+				AND d.DepartmentName = 'Sales'
+			WHERE e.EmployeeID IN (1, 2, 3)
+			""";
+
+		RunFactTest(sql);
+	}
+
+	[Fact]
+	public void ChainedJoinsWithBetweenClauseFormatCorrectly()
+	{
+		// Regression test for the #LoanListDataTape join chain in FullSuiteMBADelinquency.sql:
+		// every JOIN (bare or modified) starts its own line with the joined table and first ON
+		// condition kept together, and a short BETWEEN ... AND ... stays on one line rather than
+		// being split just because a JOIN clause follows it.
 		var expected = """
-			IF(1 = 1)
-			BEGIN
-				PRINT 'hi';
-			END
-			ELSE
-			BEGIN
-				PRINT 'bye';
-			END
+			SELECT
+				*
+			FROM #LoanListDataTape ll
+			JOIN Miser.dbo.ASSET_DETAIL_DAILY ad ON ll.LoanID = ad.LoanID
+				AND ad.Data_Date BETWEEN @backTo AND @thru
+			JOIN OperationalDatamart.dbo.D_Time dt ON dt.date_id = ad.DATA_DATE
+				AND dt.IsMonthEnd = 1;
 			""";
 
 		RunFactTest(expected);
@@ -211,26 +572,12 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
-	public void CaseWhenElseEndFormattedCorrectly()
-	{
-		var expected = """
-			CASE 
-				WHEN a = 1 THEN 'One'
-				WHEN a = 2 THEN 'Two'
-				ELSE 'Other'
-			END AS NumberText
-			""";
-		RunFactTest(expected);
-	}
-
-	[Fact]
 	public void LongerNestedFunctionsAreBrokenApart()
 	{
 		var expected = """
 			SELECT
 				COALESCE(
-					ISNULL(CAST(a AS VARCHAR(10)), 'N/A'),
-					FORMAT(a.DateSold, 'yyyy-MM-dd'),
+					ISNULL(CAST(a AS VARCHAR(10)), 'N/A'), FORMAT(a.DateSold, 'yyyy-MM-dd'),
 					MAX(CAST(a AS VARCHAR(20)))
 				)
 			""";
@@ -309,6 +656,17 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void SimpleAssignmentSelectFormattedCorrectly()
+	{
+		var expected = """
+			SELECT @foo = 3
+			FROM foo
+			""";
+
+		RunFactTest(expected);
+	}
+
+	[Fact]
 	public void SingleColumnSelectFormattedCorrectly()
 	{
 		var expected = """
@@ -320,11 +678,15 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
-	public void SimpleAssignmentSelectFormattedCorrectly()
+	public void GotoAfterMultiLineStringConcatStaysOnOwnLine()
 	{
 		var expected = """
-			SELECT @foo = 3
-			FROM foo
+			IF @intErr <> 0
+			BEGIN
+				SET @chvErrMessage = 'ERROR: Stored Procedure up_AIFu_SecondaryUpdateAssetDetail ' +
+					'failed at: Update. Correct the problem and Rerun.'
+				GOTO ErrorHandler
+			END
 			""";
 
 		RunFactTest(expected);
@@ -358,46 +720,6 @@ public sealed class SqlCanonicalizationServiceTests
 			WHERE a = 3
 			""";
 
-		RunFactTest(expected);
-	}
-
-	[Fact]
-	public void InsertBasicFormattedCorrectly()
-	{
-		var expected = """
-			INSERT INTO foo 
-			(
-				a, 
-				b, 
-				c
-			)
-			VALUES
-			(
-				'a', 
-				'b', 
-				'c'
-			)
-			""";
-
-		RunFactTest(expected);
-	}
-
-	[Fact]
-	public void InsertWithSelectFormattedCorrectly()
-	{
-		var expected = """
-			INSERT INTO foo 
-			(
-				a, 
-				b, 
-				c
-			)
-			SELECT
-				a.One,
-				a.Two,
-				a.Three
-			FROM dbo.Blerg a
-			""";
 		RunFactTest(expected);
 	}
 
@@ -496,36 +818,8 @@ public sealed class SqlCanonicalizationServiceTests
 
 	private string NormalizeWhitespace(string input)
 	{
-		var normalizedInput = input.Replace("\r\n", "\n").Replace('\r', '\n');
-		var lines = normalizedInput.Split('\n');
-		var sb = new StringBuilder();
-		var preserveLineBreak = false;
-
-		for (var i = 0; i < lines.Length; i++)
-		{
-			var normalizedLine = System.Text.RegularExpressions.Regex.Replace(lines[i], @"\s+", " ").Trim();
-			if (normalizedLine.Length == 0)
-			{
-				continue;
-			}
-
-			if (sb.Length > 0)
-			{
-				if (preserveLineBreak)
-				{
-					sb.AppendLine();
-				}
-				else
-				{
-					sb.Append(' ');
-				}
-			}
-
-			sb.Append(normalizedLine);
-			preserveLineBreak = ContainsSqlSingleLineComment(normalizedLine);
-		}
-
-		return sb.ToString().Trim();
+		// Preserve comments and original SQL structure exactly; only normalize line endings.
+		return input.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
 	}
 
 	private string RunFactTest(string expected)
@@ -546,6 +840,8 @@ public sealed class SqlCanonicalizationServiceTests
 		var actualLines = actual.Replace("\r\n", "\n").Split('\n');
 		var maxLines = Math.Max(expectedLines.Length, actualLines.Length);
 
+		var hasDifferences = false;
+
 		for (var i = 0; i < maxLines; i++)
 		{
 			var expectedLine = i < expectedLines.Length ? expectedLines[i] : string.Empty;
@@ -555,6 +851,8 @@ public sealed class SqlCanonicalizationServiceTests
 			{
 				continue;
 			}
+
+			hasDifferences = true;
 
 			_output.WriteLine($"Line {i + 1} differs:");
 			_output.WriteLine($"  Expected({expectedLine.Length}): |{VisualizeWhitespace(expectedLine)}|");
@@ -572,6 +870,14 @@ public sealed class SqlCanonicalizationServiceTests
 		else
 		{
 			_output.WriteLine("No character-level differences detected.");
+		}
+
+		if(hasDifferences)
+		{
+			_output.WriteLine("*** Expected:");
+			_output.WriteLine(expected);
+			_output.WriteLine("*** Actual:");
+			_output.WriteLine(actual);
 		}
 	}
 }
