@@ -75,6 +75,12 @@ public partial class ShellView : Window
         }
     }
 
+    private async void OnSettingsClick(object? sender, RoutedEventArgs e)
+    {
+        var settingsView = new SettingsView();
+        await settingsView.ShowDialog(this);
+    }
+
     private SqlDocumentView? GetActiveDocumentView()
     {
         return this.GetVisualDescendants()

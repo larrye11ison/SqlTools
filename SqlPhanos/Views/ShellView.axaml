@@ -30,11 +30,20 @@
 
     <DockPanel>
         <!-- Status bar at bottom -->
-        <Border DockPanel.Dock="Bottom" 
+        <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="8,4">
-            <TextBlock Text="{Binding StatusMessage}" 
-                       FontSize="12"/>
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Name="SettingsButton"
+                        Content="⚙ Settings"
+                        Click="OnSettingsClick"
+                        Padding="6,2"
+                        FontSize="12"/>
+                <TextBlock Text="{Binding StatusMessage}"
+                           FontSize="12"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
         </Border>
 
         <!-- Main content area -->

@@ -26,18 +26,7 @@ public sealed class ConnectionProfileStoreService
 
 	public IReadOnlyList<SqlConnectionViewModel> LoadConnections()
 	{
-		if (!File.Exists(_filePath))
-		{
-			return Array.Empty<SqlConnectionViewModel>();
-		}
-
-		var json = File.ReadAllText(_filePath);
-		if (string.IsNullOrWhiteSpace(json))
-		{
-			return Array.Empty<SqlConnectionViewModel>();
-		}
-
-		var store = JsonSerializer.Deserialize<ConnectionProfileStore>(json, SerializerOptions);
+		var store = LoadStore();
 		if (store?.Connections is null || store.Connections.Count == 0)
 		{
 			return Array.Empty<SqlConnectionViewModel>();
@@ -58,25 +47,60 @@ public sealed class ConnectionProfileStoreService
 
 	public void SaveConnections(IEnumerable<SqlConnectionViewModel> connections)
 	{
+		// Read-modify-write so an existing FontFamily setting isn't wiped out by a save
+		// that only knows about connections.
+		var store = LoadStore() ?? new ConnectionProfileStore();
+		store.Connections = connections
+			.Where(connection => !string.IsNullOrWhiteSpace(connection.ServerAndInstance))
+			.Select(connection => new ConnectionProfile
+			{
+				ServerAndInstance = connection.ServerAndInstance,
+				UseWindowsAuth = connection.UseWindowsAuth,
+				UserName = connection.UserName,
+				TrustServerCertificate = connection.TrustServerCertificate
+			})
+			.ToList();
+
+		WriteStore(store);
+	}
+
+	public string? LoadFontFamily()
+	{
+		return LoadStore()?.FontFamily;
+	}
+
+	public void SaveFontFamily(string fontFamily)
+	{
+		// Read-modify-write so existing saved connections aren't wiped out by a save
+		// that only knows about the font setting.
+		var store = LoadStore() ?? new ConnectionProfileStore();
+		store.FontFamily = fontFamily;
+		WriteStore(store);
+	}
+
+	private ConnectionProfileStore? LoadStore()
+	{
+		if (!File.Exists(_filePath))
+		{
+			return null;
+		}
+
+		var json = File.ReadAllText(_filePath);
+		if (string.IsNullOrWhiteSpace(json))
+		{
+			return null;
+		}
+
+		return JsonSerializer.Deserialize<ConnectionProfileStore>(json, SerializerOptions);
+	}
+
+	private void WriteStore(ConnectionProfileStore store)
+	{
 		var directoryPath = Path.GetDirectoryName(_filePath);
 		if (!string.IsNullOrWhiteSpace(directoryPath))
 		{
 			Directory.CreateDirectory(directoryPath);
 		}
-
-		var store = new ConnectionProfileStore
-		{
-			Connections = connections
-				.Where(connection => !string.IsNullOrWhiteSpace(connection.ServerAndInstance))
-				.Select(connection => new ConnectionProfile
-				{
-					ServerAndInstance = connection.ServerAndInstance,
-					UseWindowsAuth = connection.UseWindowsAuth,
-					UserName = connection.UserName,
-					TrustServerCertificate = connection.TrustServerCertificate
-				})
-				.ToList()
-		};
 
 		var json = JsonSerializer.Serialize(store, SerializerOptions);
 		File.WriteAllText(_filePath, json);

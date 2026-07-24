@@ -95,7 +95,6 @@
         </Border>
 
         <editor:TextEditor x:Name="Editor"
-                           FontFamily="Aporetic Serif Mono"
                            FontSize="16"
                            IsReadOnly="True"
                            ShowLineNumbers="True"
