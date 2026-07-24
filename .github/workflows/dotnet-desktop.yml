@@ -30,10 +30,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           cache: true
@@ -58,7 +58,7 @@ jobs:
         run: Get-ChildItem -Path "${{ env.ARTIFACT_PATH }}" -Filter *.pdb -Recurse | Remove-Item -Force
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SqlPhanos-Build
           path: ${{ env.ARTIFACT_PATH }}

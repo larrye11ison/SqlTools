@@ -190,7 +190,7 @@ namespace SqlPhanos.ViewModels
 			try
 			{
 				var script = await _searchService.ScriptObjectAsync(SelectedConnection.ConnectionString, result);
-				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script?.Length ?? 0}");
+				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script.Length}");
 
 				var doc = new SqlDocumentViewModel(
 					result.ObjectName,
