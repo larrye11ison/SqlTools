@@ -32,8 +32,13 @@ public partial class ShellView : Window
         // focus changes or the Ctrl+Shift+P shortcut when it originates inside those controls.
         // Ctrl+Shift+P is handled directly here (rather than via a declarative Window.KeyBinding
         // + the ApplicationShortcutMessage pipeline used for the other shortcuts) for that reason.
-        AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
-        AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+        // Bubble alone is enough - the Window is the root of the visual tree, so the bubble
+        // phase always reaches back here, and handledEventsToo already bypasses any descendant
+        // marking the event Handled along the way. Registering Tunnel too made this handler
+        // fire twice per event (once tunneling down, once bubbling back up), which silently
+        // cancelled out the Ctrl+M formatting toggle (two toggles = no net change).
+        AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     private void InitializeComponent()
