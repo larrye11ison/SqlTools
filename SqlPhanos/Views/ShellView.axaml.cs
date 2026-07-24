@@ -47,6 +47,24 @@ public partial class ShellView : Window
         {
             FocusNextPane();
             e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.W && e.KeyModifiers == KeyModifiers.Control)
+        {
+            (DataContext as ShellViewModel)?.CloseActiveDocument();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
+        {
+            var activeDocument = this.GetVisualDescendants()
+                .OfType<SqlDocumentView>()
+                .FirstOrDefault(v => v.IsEffectivelyVisible);
+
+            activeDocument?.OpenFind();
+            e.Handled = true;
         }
     }
 
@@ -82,9 +100,15 @@ public partial class ShellView : Window
         var currentIndex = System.Array.IndexOf(PaneOrder, PaneFocusTracker.CurrentPaneId);
         var nextPaneId = PaneOrder[(currentIndex + 1 + PaneOrder.Length) % PaneOrder.Length];
 
+        // Always advance the cycle position, even if nothing ends up actually receiving focus
+        // below (e.g. the Documents pane's default target doesn't exist because no document is
+        // open). Otherwise GotFocus never fires for a no-op focus attempt, CurrentPaneId never
+        // moves off the pane the user started in, and every subsequent press recomputes the
+        // same "next" pane - effectively trapping the user in whichever pane they started from.
+        PaneFocusTracker.CurrentPaneId = nextPaneId;
+
         if (PaneFocusTracker.TryGetLastFocus(nextPaneId, out var element) && element is not null)
         {
-            PaneFocusTracker.CurrentPaneId = nextPaneId;
             element.Focus();
             return;
         }

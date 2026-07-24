@@ -327,6 +327,92 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void NestedCaseInsideWhenThenKeepsElseAlignedWithSiblingWhen()
+	{
+		// Regression test: IsInsideCaseBlock scanned backward token-by-token and stopped at the
+		// first END it saw, assuming that meant "not inside a CASE". When a nested CASE...END
+		// sits entirely inside an earlier WHEN...THEN branch, the nested END is not a statement
+		// boundary - it's already-closed content the scan must skip past to find the *true*
+		// enclosing CASE. Without that, the outer ELSE was mistaken for an IF-statement ELSE
+		// (dedented to column 0, with its value dropped to a new line) instead of a CASE ELSE.
+		var sql = "SELECT\n\tCASE\n\t\tWHEN a = 1 THEN\n\t\tCASE\n\t\t\tWHEN b = 1 THEN 'x'\n\t\t\tELSE 'y'\n\t\tEND\n\t\tELSE 'z'\n\tEND AS Result\nFROM t";
+		var expected = """
+			SELECT
+				CASE
+					WHEN a = 1 THEN
+					CASE
+						WHEN b = 1 THEN 'x'
+						ELSE 'y'
+					END
+					ELSE 'z'
+				END AS Result
+			FROM t;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CountStarAndTableQualifiedStarGetNoSurroundingSpaces()
+	{
+		// Regression test: '*' shared the same case as the arithmetic operators (+, -, /), which
+		// always pads it with a space on each side. COUNT(*) and x.* are wildcard "all columns"
+		// markers, not multiplication, and must render with no space around the '*' at all.
+		var sql = "SELECT COUNT(*) AS TheCount, x.* FROM t x";
+		var expected = """
+			SELECT
+				COUNT(*) AS TheCount,
+				x.*
+			FROM t x;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void UnaryMinusImmediatelyAfterOpenParenHugsTheParen()
+	{
+		// Regression test: '-' shares its case with the binary arithmetic operators, which
+		// always get a leading space. A unary minus that is the first thing inside a paren (e.g.
+		// CAST(-1.00 * ...)) must hug the '(' instead, matching every other CAST(...) in
+		// practice. The existing (already-tested) convention of a space *after* a unary minus
+		// following a comma - e.g. DATEADD(month, - 12, ...) - is intentionally left unchanged.
+		var sql = "SELECT CAST(-1.00 * SUM(amt) AS MONEY) FROM t";
+		var expected = """
+			SELECT CAST(- 1.00 * SUM(amt) AS MONEY)
+			FROM t;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void ValuesTableConstructorInsideCrossApplyIndentsUnderTheOuterParen()
+	{
+		// Regression test: the VALUES keyword and its tuple's parens always indented using the
+		// bare indentLevel, ignoring any already-active outer expanded paren scope. That's fine
+		// for the plain "INSERT INTO t VALUES (...)" form (nothing else is on the parenthesis
+		// stack at that point), but a VALUES table constructor nested inside another expanded
+		// paren - e.g. CROSS/OUTER APPLY (VALUES (...)) - collapsed to column 0 instead of
+		// nesting one level under the APPLY's own paren.
+		var sql = "SELECT\n\tv.col1\nFROM t\nCROSS APPLY (VALUES (t.a, t.b)) AS v(col1, col2)";
+		var expected = """
+			SELECT v.col1
+			FROM t
+			CROSS APPLY
+			(
+				VALUES
+				(
+					t.a,
+					t.b
+				)
+			) AS v(col1, col2);
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void ShortCastAndBuiltInFunctionsStayOnOneLineAndAreCapitalized()
 	{
 		// CAST(...) - and other built-in functions like DATEADD - must stay on one line when

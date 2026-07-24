@@ -531,7 +531,11 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.Values:
 						AppendLineIfNeeded(result, ref lineStart);
-						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						// GetActiveExpandedParenthesisDepth accounts for an outer scope already
+						// on the stack, e.g. CROSS APPLY (VALUES (...)) - a VALUES table
+						// constructor nested inside another expanded paren, as opposed to the
+						// plain "INSERT INTO t VALUES (...)" form where the stack is empty here.
+						AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						pendingInsertColumnList = false;
 						pendingValuesList = true;
@@ -670,7 +674,31 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
-						AppendSpaceIfNeeded(result, lineStart);
+						if (token.TokenType == TSqlTokenType.Star)
+						{
+							var previousStarIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+							var previousStarType = previousStarIndex >= 0 ? tokens[previousStarIndex].TokenType : TSqlTokenType.None;
+							if (previousStarType is TSqlTokenType.LeftParenthesis or TSqlTokenType.Dot)
+							{
+								// COUNT(*) / x.* - a wildcard "all columns" marker, not a
+								// multiplication operator, so it gets no surrounding spaces.
+								result.Append(token.Text);
+								previousWasStatementEnd = false;
+								break;
+							}
+						}
+
+						var previousOperatorIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var isUnaryMinusAfterParen = token.TokenType == TSqlTokenType.Minus &&
+							previousOperatorIndex >= 0 &&
+							tokens[previousOperatorIndex].TokenType == TSqlTokenType.LeftParenthesis;
+						if (!isUnaryMinusAfterParen)
+						{
+							// A unary minus immediately after '(' - e.g. CAST(-1.00 * ...) - must
+							// hug the paren rather than gaining the binary operator's usual
+							// leading space.
+							AppendSpaceIfNeeded(result, lineStart);
+						}
 						result.Append(token.Text);
 						var nextOperatorIndex = NextNonWhitespaceIndex(tokens, i + 1);
 						var shouldBreakAfterOperator = false;
@@ -882,7 +910,9 @@ public sealed class SqlCanonicalizationService
 								result.AppendLine();
 								lineStart = true;
 							}
-							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							// Same outer-scope accounting as the VALUES keyword itself, so this
+							// opening paren lines up under it rather than at column 0.
+							AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
 							result.Append(token.Text);
 							result.AppendLine();
 							lineStart = true;
@@ -1085,12 +1115,16 @@ public sealed class SqlCanonicalizationService
 						if (inValuesList && parenthesisDepth == valuesListDepth)
 						{
 							parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+							PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 							result.AppendLine();
-							AppendIndent(result, indentLevel);
+							// Popped above (before computing indent) so this closing paren lines
+							// up with VALUES's own line - i.e. only the still-active outer scope,
+							// like CROSS APPLY's own paren, counts here, not the tuple's own
+							// now-closed scope.
+							AppendIndent(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack));
 							result.Append(token.Text);
 							inValuesList = false;
 							valuesListDepth = -1;
-							PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 							previousWasStatementEnd = false;
 							break;
 						}
@@ -2243,33 +2277,51 @@ public sealed class SqlCanonicalizationService
 
 	private static bool IsInsideCaseBlock(IList<TSqlParserToken> tokens, int tokenIndex)
 	{
-		var depth = 0;
+		var parenDepth = 0;
+		// Every END belongs to some earlier opener (CASE or BEGIN) that has already closed by
+		// the time we reach tokenIndex - e.g. a nested CASE...END entirely inside an earlier
+		// WHEN...THEN branch. Scanning backward must skip past each such already-closed pair
+		// (tracked here) rather than stopping at the first END it sees, or a nested CASE/BEGIN
+		// block between tokenIndex and its true enclosing CASE gets mistaken for that boundary.
+		var endDepth = 0;
 		for (var i = tokenIndex - 1; i >= 0; i--)
 		{
 			var tokenType = tokens[i].TokenType;
 			if (tokenType == TSqlTokenType.RightParenthesis)
 			{
-				depth++;
+				parenDepth++;
 				continue;
 			}
 
 			if (tokenType == TSqlTokenType.LeftParenthesis)
 			{
-				depth = Math.Max(0, depth - 1);
+				parenDepth = Math.Max(0, parenDepth - 1);
 				continue;
 			}
 
-			if (depth > 0 || tokenType == TSqlTokenType.WhiteSpace)
+			if (parenDepth > 0 || tokenType == TSqlTokenType.WhiteSpace)
 			{
 				continue;
 			}
 
-			if (tokenType == TSqlTokenType.Case)
+			if (tokenType == TSqlTokenType.End)
 			{
-				return true;
+				endDepth++;
+				continue;
 			}
 
-			if (tokenType is TSqlTokenType.End or TSqlTokenType.Semicolon)
+			if (tokenType is TSqlTokenType.Case or TSqlTokenType.Begin)
+			{
+				if (endDepth > 0)
+				{
+					endDepth--;
+					continue;
+				}
+
+				return tokenType == TSqlTokenType.Case;
+			}
+
+			if (endDepth == 0 && tokenType == TSqlTokenType.Semicolon)
 			{
 				return false;
 			}
