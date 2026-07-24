@@ -30,7 +30,7 @@ BEGIN
 						COALESCE(
 							NULLIF(
 								ISNULL(
-									TRY_CAST( JSON_VALUE(@JsonPayload, '$.config.threshold') AS NUMERIC(10, 2)),
+									TRY_CAST(JSON_VALUE(@JsonPayload, '$.config.threshold') AS NUMERIC(10, 2)),
 									TYPEPROPERTY(RTRIM(LTRIM(' decimal ')), 'Precision')
 									),
 								0
