@@ -104,6 +104,10 @@ public sealed class SqlCanonicalizationService
 			var alterTablePrimaryKeyListDepth = -1;
 			var alterTablePrimaryKeyListMultiColumn = false;
 			var parenthesisStack = new Stack<ParenthesisScope>();
+			// Keyed by the current expanded-paren depth (GetActiveExpandedParenthesisDepth) so a
+			// derived table's own JOIN/ON chain gets its own independent stack instead of being
+			// confused with an outer, not-yet-resolved JOIN it happens to be nested inside.
+			var joinFramesByDepth = new Dictionary<int, Stack<JoinFrame>>();
 			var pendingBeginTryCatchFinally = false;
 			var betweenAndJustEmitted = false;
 			var inCreateObjectParameterList = false;
@@ -113,6 +117,73 @@ public sealed class SqlCanonicalizationService
 			var caseExpressionDepth = 0;
 			var caseWhenIndent = 0;
 			var currentLineTokenLength = 0;
+			// Indent of each currently-open CASE's own line, innermost on top - lets WHEN/END
+			// align with wherever their CASE actually landed instead of recomputing independently
+			// (which silently disagreed once CASE started consulting currentConditionIndent below).
+			var caseIndentStack = new Stack<int>();
+			// The indent that a boolean-clause continuation (AND/OR, or a CASE expression used as
+			// a condition) should use right now - i.e. one level deeper than whatever line the
+			// current WHERE/HAVING/ON clause actually landed on. Plain indentLevel + 1 works for a
+			// top-level WHERE, but a nested join's ON can land on a deeper line than indentLevel
+			// implies, so this is tracked explicitly instead of recomputed from indentLevel alone.
+			var currentConditionIndent = indentLevel + 1;
+			// True exactly while inside the token span of an active WHERE/HAVING/ON condition (set
+			// at those keywords, cleared at the next clause boundary or statement end). Needed
+			// because "not in a SELECT list, not inside parens" alone also matches things like a
+			// bare CASE...END expression fragment with no enclosing WHERE at all, where CASE's old
+			// column-0 behavior was already correct and currentConditionIndent doesn't apply.
+			var inConditionClause = false;
+
+			// CASE/END need the same "are we inside an active WHERE/ON/HAVING condition" distinction
+			// that currentConditionIndent exists for for AND/OR - GetContentIndent alone has no way
+			// to know about it, which is exactly why a CASE used as a WHERE/ON/HAVING condition
+			// previously collapsed to column 0.
+			int GetCaseAwareContentIndent()
+			{
+				// Only take over when the CASE sits directly in the condition, with no additional
+				// expression paren wrapping it (e.g. a function-call argument) - that narrower case
+				// keeps relying on GetContentIndent's existing (already-correct) paren-depth math.
+				if (inConditionClause && GetActiveExpandedParenthesisDepth(parenthesisStack) == 0)
+				{
+					return currentConditionIndent;
+				}
+
+				return GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+			}
+
+			// Computes the indent for a JOIN clause's first token and records it on the
+			// join-frame stack for the current expanded-paren depth. When this JOIN starts while
+			// another JOIN at the same depth is still awaiting its ON (nestingDepth > 0), it is a
+			// "nested join" folded into the still-open outer JOIN's composite table source: bump
+			// the indent one level deeper than the outer JOIN's own nesting, and mark that outer
+			// frame so its eventual ON breaks onto its own line instead of staying glued to
+			// whichever JOIN keyword happens to precede it. expectsOnClause is false for
+			// CROSS JOIN/CROSS APPLY/OUTER APPLY, none of which are ever followed by an ON.
+			int BeginJoinClause(bool expectsOnClause)
+			{
+				var depthKey = GetActiveExpandedParenthesisDepth(parenthesisStack);
+				var baseIndent = indentLevel + depthKey;
+				if (!joinFramesByDepth.TryGetValue(depthKey, out var frames))
+				{
+					frames = new Stack<JoinFrame>();
+					joinFramesByDepth[depthKey] = frames;
+				}
+
+				var nestingDepth = frames.Count;
+				if (nestingDepth > 0)
+				{
+					frames.Peek().HadNestedContent = true;
+				}
+
+				var joinLineIndent = nestingDepth > 0 ? baseIndent + nestingDepth + 1 : baseIndent;
+
+				if (expectsOnClause)
+				{
+					frames.Push(new JoinFrame { Indent = joinLineIndent });
+				}
+
+				return joinLineIndent;
+			}
 
 			for (var i = 0; i < tokens.Count; i++)
 			{
@@ -290,7 +361,11 @@ public sealed class SqlCanonicalizationService
 						if (IsInsideCaseBlock(tokens, i))
 						{
 							AppendLineIfNeeded(result, ref lineStart);
-							var elseIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+							// Same level as this CASE's WHEN clauses - see the WHEN case for why this
+							// can't be recomputed from GetContentIndent alone.
+							var elseIndent = caseIndentStack.Count > 0
+								? caseIndentStack.Peek() + 1
+								: GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
 							caseWhenIndent = elseIndent;
 							AppendIndentIfNeeded(result, elseIndent, ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
@@ -337,7 +412,11 @@ public sealed class SqlCanonicalizationService
 								parenthesisStack.Pop();
 							}
 							AppendLineIfNeeded(result, ref lineStart);
-							AppendIndentIfNeeded(result, GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth), ref lineStart);
+							// Align with this CASE's own indent (from when it opened), not a fresh
+							// recomputation - the two can disagree once currentConditionIndent has
+							// moved on to a different clause by the time this END is reached.
+							var endIndent = caseIndentStack.Count > 0 ? caseIndentStack.Pop() : GetCaseAwareContentIndent();
+							AppendIndentIfNeeded(result, endIndent, ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
 							caseExpressionDepth = Math.Max(0, caseExpressionDepth - 1);
 							previousWasStatementEnd = false;
@@ -445,6 +524,11 @@ public sealed class SqlCanonicalizationService
 							indentLevel,
 							parenthesisStack,
 							inInClause && parenthesisDepth == inClauseDepth);
+						inConditionClause = token.TokenType is TSqlTokenType.Where or TSqlTokenType.Having;
+						if (inConditionClause)
+						{
+							currentConditionIndent = clauseIndent + 1;
+						}
 						AppendIndentIfNeeded(result, clauseIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
@@ -586,8 +670,11 @@ public sealed class SqlCanonicalizationService
 							}
 							else
 							{
+								// CROSS is the only modifier here that can never be followed by an
+								// ON clause (CROSS JOIN / CROSS APPLY both lack one).
+								var crossJoinIndent = BeginJoinClause(expectsOnClause: token.TokenType != TSqlTokenType.Cross);
 								AppendLineIfNeeded(result, ref lineStart);
-								AppendIndentIfNeeded(result, joinIndent, ref lineStart);
+								AppendIndentIfNeeded(result, crossJoinIndent, ref lineStart);
 							}
 
 							result.Append(token.Text.ToUpperInvariant());
@@ -611,9 +698,57 @@ public sealed class SqlCanonicalizationService
 						}
 						else
 						{
+							// A bare "JOIN" (defaults to INNER) always expects an ON clause.
+							var bareJoinIndent = BeginJoinClause(expectsOnClause: true);
 							AppendLineIfNeeded(result, ref lineStart);
-							AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+							AppendIndentIfNeeded(result, bareJoinIndent, ref lineStart);
 						}
+						result.Append(token.Text.ToUpperInvariant());
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.On:
+						// Resolve this ON against the most recently opened, still-unresolved JOIN
+						// at the current paren depth (T-SQL matches ON to JOIN LIFO, like matching
+						// brackets). Outside of an active JOIN chain (e.g. CREATE TABLE ... ON
+						// [PRIMARY], a trigger's "ON dbo.Table", SET ... ON) the frame stack for
+						// this depth is empty/absent and ON is appended inline exactly as before.
+						var onDepthKey = GetActiveExpandedParenthesisDepth(parenthesisStack);
+						var hasOpenJoinFrame = joinFramesByDepth.TryGetValue(onDepthKey, out var onFrames) && onFrames.Count > 0;
+						if (hasOpenJoinFrame)
+						{
+							inConditionClause = true;
+							var closingJoinFrame = onFrames!.Pop();
+							if (closingJoinFrame.HadNestedContent)
+							{
+								// This ON closes an outer JOIN whose composite table source had
+								// another (nested) JOIN folded into it - break it onto its own,
+								// less-indented line so it reads as closing the outer JOIN rather
+								// than continuing the nested one that was just emitted. Note this is
+								// NOT always closingJoinFrame.Indent + 1: when the closing JOIN was
+								// itself nested (its own line already deeper than its "logical"
+								// slot), this is the formula that actually lands one level below the
+								// JOIN it closes - see BeginJoinClause for the matching push-side math.
+								var onLineIndent = indentLevel + onDepthKey + onFrames.Count + 1;
+								currentConditionIndent = onLineIndent + 1;
+								AppendLineIfNeeded(result, ref lineStart);
+								AppendIndentIfNeeded(result, onLineIndent, ref lineStart);
+							}
+							else
+							{
+								// Inline with its JOIN, so AND/OR continuations of its condition (and
+								// any CASE expression among them) belong one level deeper than that
+								// JOIN's own line - not indentLevel + 1, which only happens to be
+								// right when the JOIN this ON closes wasn't itself nested.
+								currentConditionIndent = closingJoinFrame.Indent + 1;
+								AppendSpaceIfNeeded(result, lineStart);
+							}
+						}
+						else
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+						}
+
 						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
 						break;
@@ -661,7 +796,10 @@ public sealed class SqlCanonicalizationService
 						}
 
 						AppendLineIfNeeded(result, ref lineStart);
-						AppendIndentIfNeeded(result, indentLevel + 1, ref lineStart);
+						// Outside an active WHERE/HAVING/ON (e.g. an IF/WHILE condition, which
+						// indents relative to the current block nesting, not a tracked clause),
+						// currentConditionIndent doesn't apply - fall back to the previous behavior.
+						AppendIndentIfNeeded(result, inConditionClause ? currentConditionIndent : indentLevel + 1, ref lineStart);
 						var keywordText = token.TokenType == TSqlTokenType.And && !inCasePredicate ? token.Text : token.Text.ToUpperInvariant();
 						result.Append(keywordText);
 						result.Append(' ');
@@ -698,9 +836,19 @@ public sealed class SqlCanonicalizationService
 						}
 
 						var previousOperatorIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var previousOperatorType = previousOperatorIndex >= 0 ? tokens[previousOperatorIndex].TokenType : TSqlTokenType.None;
 						var isUnaryMinusAfterParen = token.TokenType == TSqlTokenType.Minus &&
-							previousOperatorIndex >= 0 &&
-							tokens[previousOperatorIndex].TokenType == TSqlTokenType.LeftParenthesis;
+							previousOperatorType == TSqlTokenType.LeftParenthesis;
+						// A unary minus (negative literal) never gets the binary operator's
+						// trailing space either - e.g. DATEADD(DAY, -30, GETDATE()) must render as
+						// "-30", not "- 30", and "x >= -1" must not become "x >= - 1". Scoped to
+						// unambiguous contexts where a minus can only be unary - right after '(',
+						// ',', or another operator token (=, >, < - also how >=, <=, <> tokenize,
+						// each ending in one of these) - to avoid misreading an actual subtraction
+						// like "a - 1" as unary.
+						var isUnaryMinus = token.TokenType == TSqlTokenType.Minus &&
+							previousOperatorType is TSqlTokenType.LeftParenthesis or TSqlTokenType.Comma
+								or TSqlTokenType.EqualsSign or TSqlTokenType.GreaterThan or TSqlTokenType.LessThan;
 						if (!isUnaryMinusAfterParen)
 						{
 							// A unary minus immediately after '(' - e.g. CAST(-1.00 * ...) - must
@@ -743,6 +891,10 @@ public sealed class SqlCanonicalizationService
 								TrimTrailingSpaces(result);
 							}
 							currentLineTokenLength = 0;
+						}
+						else if (isUnaryMinus)
+						{
+							currentLineTokenLength += token.Text.Length;
 						}
 						else
 						{
@@ -1420,7 +1572,8 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.Case:
 						caseExpressionDepth++;
 						AppendLineIfNeeded(result, ref lineStart);
-						var caseIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+						var caseIndent = GetCaseAwareContentIndent();
+						caseIndentStack.Push(caseIndent);
 						AppendIndentIfNeeded(result, caseIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						parenthesisStack.Push(new ParenthesisScope(CasePhantomParenthesisDepth));
@@ -1429,7 +1582,11 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.When:
 						AppendLineIfNeeded(result, ref lineStart);
-						var whenIndent = GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
+						// One level deeper than this WHEN's own CASE, wherever that CASE actually
+						// landed (GetContentIndent alone can't know that - see GetCaseAwareContentIndent).
+						var whenIndent = caseIndentStack.Count > 0
+							? caseIndentStack.Peek() + 1
+							: GetContentIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth);
 						caseWhenIndent = whenIndent;
 						AppendIndentIfNeeded(result, whenIndent, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
@@ -1621,6 +1778,8 @@ public sealed class SqlCanonicalizationService
 					inAlterTablePrimaryKeyList = false;
 					alterTablePrimaryKeyListDepth = -1;
 					alterTablePrimaryKeyListMultiColumn = false;
+					inConditionClause = false;
+					currentConditionIndent = indentLevel + 1;
 				}
 			}
 
@@ -3069,6 +3228,28 @@ public sealed class SqlCanonicalizationService
 		}
 
 		public int ParenthesisDepth { get; }
+	}
+
+	/// <summary>
+	/// Tracks one open JOIN that is still awaiting its ON clause, so a "nested join" (a JOIN
+	/// whose composite table source itself contains another JOIN before the outer JOIN's own ON
+	/// appears - e.g. "a LEFT JOIN b INNER JOIN c ON c.x = b.x ON b.y = a.y") can be rendered with
+	/// the inner join folded onto its own deeper-indented line while the outer JOIN's ON drops to
+	/// its own, less-indented line - instead of both ON clauses colliding on one line with no
+	/// visual indication of which ON belongs to which JOIN. T-SQL resolves each ON against the
+	/// most recently opened unresolved JOIN (LIFO, like matching brackets), so this only needs a
+	/// simple stack kept alongside the token walk - no AST/subquery rewriting required.
+	/// </summary>
+	private sealed class JoinFrame
+	{
+		public bool HadNestedContent { get; set; }
+
+		/// <summary>
+		/// The indent level of this JOIN's own line, captured when the frame is pushed - lets the
+		/// matching ON (and anything, like a CASE expression, that continues that ON's condition)
+		/// pick up the correct indent context even when this JOIN was itself a nested join.
+		/// </summary>
+		public int Indent { get; set; }
 	}
 
 	/// <summary>

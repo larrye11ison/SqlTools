@@ -24,7 +24,7 @@ BEGIN
 					SELECT 1
 					FROM sys.objects
 					WHERE name = 'TargetTable'
-					AND type = 'U'
+						AND type = 'U'
 					)
 				BEGIN
 					SET @CurrentStep = 'PROCESSING';
@@ -142,17 +142,18 @@ BEGIN
 		FROM dbo.BazTable z
 		/* --- START OF NESTED JOIN GEOMETRY --- */
 		LEFT OUTER JOIN dbo.FooTable f
-		INNER JOIN dbo.BarTable b ON b.FooID = f.FooID
-			AND b.IsCurrent = 1
-			AND (
+				INNER JOIN dbo.BarTable b ON b.FooID = f.FooID
+					AND b.IsCurrent = 1
+					AND (
 			b.StatusCode IN ('A', 'P')
-			OR b.Flag =
+					OR b.Flag =
 			CASE
 				WHEN f.Type = 'X' THEN 1
 				ELSE 0
 			END
-			) ON f.BaseID = z.BaseID
-			AND f.PartitionDate >= CAST('2026-01-01' AS DATE)
+			)
+			ON f.BaseID = z.BaseID
+				AND f.PartitionDate >= CAST('2026-01-01' AS DATE)
 		/* --- END OF NESTED JOIN GEOMETRY --- */
 		CROSS APPLY
 		(

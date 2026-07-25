@@ -16,6 +16,52 @@ public sealed class SqlCanonicalizationServiceTests
 	public SqlCanonicalizationServiceTests(ITestOutputHelper output) => _output = output;
 
 	[Fact]
+	public void NestedJoinIndentsInnerJoinAndDedentsOuterOn()
+	{
+		// A "nested join" (T-SQL's own term - see "Using Nested Joins" in the FROM clause docs):
+		// the INNER JOIN's table source is folded into the LEFT OUTER JOIN's composite table
+		// source before the outer join's own ON appears, so T-SQL resolves each ON against the
+		// most recently opened unresolved JOIN (LIFO) rather than the textually-nearest one. The
+		// inner join is rendered as a single deeper-indented unit (JOIN + its own ON together),
+		// while the outer join's ON drops to its own, one-level-dedented line - making which ON
+		// belongs to which JOIN unambiguous without requiring explicit parentheses.
+		var sql = "select *\nfrom b\nleft outer join l\ninner join i on i.id = l.id\non l.b_id = b.b_id";
+		var expected = """
+			SELECT
+				*
+			FROM b
+			LEFT OUTER JOIN l
+					INNER JOIN i ON i.id = l.id
+				ON l.b_id = b.b_id;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void MultiLevelNestedJoinsFormAStaircase()
+	{
+		// Three joins nested inside one another (a JOIN b JOIN c JOIN d, none resolved by an ON
+		// until all three table sources are in place) - each additional nesting level indents one
+		// step deeper, and the three closing ONs unwind back down one level at a time in reverse
+		// order, mirroring the LIFO ON-to-JOIN matching that makes this valid T-SQL in the first
+		// place.
+		var sql = "select *\nfrom a\njoin b\njoin c\njoin d on d.x = c.x\non c.y = b.y\non b.z = a.z";
+		var expected = """
+			SELECT
+				*
+			FROM a
+			JOIN b
+					JOIN c
+						JOIN d ON d.x = c.x
+					ON c.y = b.y
+				ON b.z = a.z;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void CreateTableAndInsertColumnListParenAreConsistentByDefault()
 	{
 		// Regression test: CREATE TABLE's column-list paren stayed glued to the same line
@@ -455,14 +501,117 @@ public sealed class SqlCanonicalizationServiceTests
 	public void UnaryMinusImmediatelyAfterOpenParenHugsTheParen()
 	{
 		// Regression test: '-' shares its case with the binary arithmetic operators, which
-		// always get a leading space. A unary minus that is the first thing inside a paren (e.g.
-		// CAST(-1.00 * ...)) must hug the '(' instead, matching every other CAST(...) in
-		// practice. The existing (already-tested) convention of a space *after* a unary minus
-		// following a comma - e.g. DATEADD(month, - 12, ...) - is intentionally left unchanged.
+		// always get leading/trailing spaces. A unary minus (negative literal) instead hugs
+		// whatever number it negates on both sides - the '(' it directly follows here (e.g.
+		// CAST(-1.00 * ...), matching every other CAST(...) in practice) and the literal itself,
+		// so it never picks up the binary operators' usual spacing.
 		var sql = "SELECT CAST(-1.00 * SUM(amt) AS MONEY) FROM t";
 		var expected = """
-			SELECT CAST(- 1.00 * SUM(amt) AS MONEY)
+			SELECT CAST(-1.00 * SUM(amt) AS MONEY)
 			FROM t;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void UnaryMinusAfterCommaAndComparisonOperatorsHugsTheLiteral()
+	{
+		// A unary minus can only ever follow '(', ',', or another operator token (=, >, < - also
+		// how >=, <=, <> tokenize) - never an identifier/number/closing paren, which would make it
+		// binary subtraction instead. "a - 1" (identifier before '-') must keep its normal spacing
+		// on both sides; every unary case must hug the literal it negates with no trailing space.
+		var sql = "SELECT DATEADD(DAY, -30, GETDATE()), a - 1, c = -5, d >= -1, e <> -1, f < -1, h > -1, i <= -1";
+		var expected = """
+			SELECT
+				DATEADD(DAY, -30, GETDATE()),
+				a - 1,
+				c = -5,
+				d >= -1,
+				e <> -1,
+				f < -1,
+				h > -1,
+				i <= -1
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CaseExpressionInWhereClauseIndentsRelativeToWhere()
+	{
+		// Regression test: a CASE expression used directly as a WHERE/HAVING/ON condition (not
+		// inside a SELECT column list, not wrapped in an extra expression paren) used to collapse
+		// to column 0 regardless of how deep the enclosing clause actually was, since its indent
+		// was computed from raw indentLevel/paren-depth alone with no awareness of where the
+		// WHERE clause itself landed. It must now align one level under WHERE, matching how a
+		// plain AND/OR condition already does.
+		var sql = "SELECT *\nFROM t\nWHERE CASE WHEN a = 1 THEN 1 ELSE 0 END = 1\nAND CASE WHEN b = 1 THEN 1 ELSE 0 END = 1";
+		var expected = """
+			SELECT
+				*
+			FROM t
+			WHERE
+				CASE
+					WHEN a = 1 THEN 1
+					ELSE 0
+				END = 1
+				AND
+				CASE
+					WHEN b = 1 THEN 1
+					ELSE 0
+				END = 1;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CaseExpressionInNestedJoinOnIndentsRelativeToThatOn()
+	{
+		// The same indentation-context bug as CaseExpressionInWhereClauseIndentsRelativeToWhere,
+		// but for a nested join's ON - the case that originally exposed it. CASE is a peer
+		// continuation of the condition alongside AND, so it lands at the same indent AND does -
+		// one level under the INNER JOIN's own (already deeper, nested-join) ON - not under the
+		// outer statement's base indent.
+		var sql = "select *\nfrom a\nleft outer join b\ninner join c on c.id = b.id\nAND CASE WHEN c.flag = 1 THEN 1 ELSE 0 END = 1\non b.a_id = a.id";
+		var expected = """
+			SELECT
+				*
+			FROM a
+			LEFT OUTER JOIN b
+					INNER JOIN c ON c.id = b.id
+						AND
+						CASE
+							WHEN c.flag = 1 THEN 1
+							ELSE 0
+						END = 1
+				ON b.a_id = a.id;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void IfConditionAndIndentsRelativeToCurrentBlockNesting()
+	{
+		// Regression test: fixing AND/OR's indent to track a WHERE/ON clause's actual depth (for
+		// nested joins) must not affect an IF/WHILE condition's AND, which has nothing to do with
+		// WHERE/ON tracking and must keep indenting one level under the IF itself, wherever that
+		// IF sits in the current BEGIN/END nesting.
+		var sql = "IF @a IS NOT NULL\nAND @a > 0\nBEGIN\n\tIF @b IS NOT NULL\n\tAND @b > 0\n\tBEGIN\n\t\tPRINT 'hi';\n\tEND;\nEND;";
+		var expected = """
+			IF @a IS NOT NULL
+				AND @a > 0
+			BEGIN
+				IF @b IS NOT NULL
+					AND @b > 0
+				BEGIN
+					PRINT 'hi';
+
+				END;
+
+			END;
 			""";
 
 		RunFactTest(sql, expected);
