@@ -56,8 +56,7 @@ BEGIN
 
 							ELSE
 							BEGIN
-								INSERT INTO dbo.LogTable
-								(
+								INSERT INTO dbo.LogTable (
 									LogMsg,
 									LogDate
 								)
@@ -189,8 +188,7 @@ BEGIN
 			@OutputStatus = ERROR_MESSAGE(),
 			@CurrentStep = 'FAILED_AT_' + @CurrentStep;
 
-		INSERT INTO dbo.ErrorLog
-		(
+		INSERT INTO dbo.ErrorLog (
 			ErrNum,
 			ErrSev,
 			ErrState,

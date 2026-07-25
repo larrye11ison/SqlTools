@@ -12,7 +12,16 @@ public sealed class SqlCanonicalizationService
 	private const int LongExpressionLineBreakThreshold = 75;
 	private const int CasePhantomParenthesisDepth = -1;
 
-	public string FormatForDisplay(string sql)
+	/// <param name="sql">The SQL text to format.</param>
+	/// <param name="openingParenOnNewLine">
+	/// Controls where the opening paren of a top-level column/parameter list goes for
+	/// CREATE TABLE, INSERT INTO's column list, and CREATE PROC/FUNCTION/VIEW/TRIGGER's
+	/// parameter list - false (default) keeps it glued to the end of the preceding line
+	/// (e.g. "CREATE TABLE Foo ("), true puts it on its own line. Does not affect
+	/// expression-level or function-call parens (e.g. COALESCE(x, y)), which always stay
+	/// attached regardless of this setting.
+	/// </param>
+	public string FormatForDisplay(string sql, bool openingParenOnNewLine = false)
 	{
 		if (string.IsNullOrWhiteSpace(sql))
 		{
@@ -862,6 +871,11 @@ public sealed class SqlCanonicalizationService
 							inCreateStatementParams = true;
 							inCreateObjectParameterList = true;
 							createObjectParameterListDepth = parenthesisDepth;
+							if (openingParenOnNewLine && !lineStart)
+							{
+								result.AppendLine();
+								lineStart = true;
+							}
 							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 							result.Append(token.Text);
 							result.AppendLine();
@@ -886,7 +900,7 @@ public sealed class SqlCanonicalizationService
 							pendingInsertColumnList = false;
 							inInsertColumnList = true;
 							insertColumnListDepth = parenthesisDepth;
-							if (!lineStart)
+							if (openingParenOnNewLine && !lineStart)
 							{
 								result.AppendLine();
 								lineStart = true;
@@ -1248,7 +1262,7 @@ public sealed class SqlCanonicalizationService
 							{
 								var nextCreateNewlineIndex = NextNonWhitespaceIndex(tokens, i + 1);
 								var nextCreateNewlineType = nextCreateNewlineIndex < tokens.Count ? tokens[nextCreateNewlineIndex].TokenType : TSqlTokenType.None;
-								if (nextCreateNewlineType != TSqlTokenType.LeftParenthesis)
+								if (nextCreateNewlineType != TSqlTokenType.LeftParenthesis || openingParenOnNewLine)
 								{
 									result.AppendLine();
 									lineStart = true;
@@ -1299,7 +1313,14 @@ public sealed class SqlCanonicalizationService
 								var previousCreateIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 								var previousCreateType = previousCreateIndex >= 0 ? tokens[previousCreateIndex].TokenType : TSqlTokenType.None;
 								var nextCreateType = nextIndex < tokens.Count ? tokens[nextIndex].TokenType : TSqlTokenType.None;
-								if (previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger or TSqlTokenType.Table || nextCreateType == TSqlTokenType.LeftParenthesis)
+								// Two independent reasons to glue onto the same line: right after the
+								// CREATE TABLE/PROC/etc keyword itself (always, unrelated to paren
+								// placement - that's just "CREATE TABLE" staying on one line), or right
+								// before the parameter/column list's opening paren (only when the
+								// same-line option is in effect).
+								var glueAfterCreateKeyword = previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger or TSqlTokenType.Table;
+								var glueBeforeParameterList = !openingParenOnNewLine && nextCreateType == TSqlTokenType.LeftParenthesis;
+								if (glueAfterCreateKeyword || glueBeforeParameterList)
 								{
 									result.Append(' ');
 								}

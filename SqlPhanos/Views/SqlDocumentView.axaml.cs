@@ -32,8 +32,8 @@ public partial class SqlDocumentView : UserControl
         ActualThemeVariantChanged += (_, _) => ApplyTheme();
 
         ApplyFont();
-        FontSettingsService.FontFamilyChanged += OnFontFamilyChanged;
-        DetachedFromVisualTree += (_, _) => FontSettingsService.FontFamilyChanged -= OnFontFamilyChanged;
+        FontSettingsService.SettingsChanged += OnFontSettingsChanged;
+        DetachedFromVisualTree += (_, _) => FontSettingsService.SettingsChanged -= OnFontSettingsChanged;
     }
 
     public void FocusEditor()
@@ -67,7 +67,7 @@ public partial class SqlDocumentView : UserControl
         _editor = this.FindControl<TextEditor>("Editor");
     }
 
-    private void OnFontFamilyChanged(object? sender, System.EventArgs e)
+    private void OnFontSettingsChanged(object? sender, System.EventArgs e)
     {
         ApplyFont();
     }
@@ -77,6 +77,7 @@ public partial class SqlDocumentView : UserControl
         if (_editor is not null)
         {
             _editor.FontFamily = new FontFamily(FontSettingsService.CurrentFontFamily);
+            _editor.FontSize = FontSettingsService.CurrentFontSize;
         }
     }
 

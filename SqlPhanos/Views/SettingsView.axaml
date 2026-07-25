@@ -3,12 +3,12 @@
         xmlns:vm="using:SqlPhanos.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="180"
+        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="300"
         x:Class="SqlPhanos.Views.SettingsView"
         x:DataType="vm:SettingsViewModel"
         Title="Settings"
         Width="420"
-        Height="180"
+        Height="300"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
 
@@ -31,6 +31,22 @@
             <ComboBox ItemsSource="{Binding AvailableFonts}"
                       SelectedItem="{Binding SelectedFont}"
                       HorizontalAlignment="Stretch"/>
+
+            <TextBlock Text="Editor font size" FontWeight="SemiBold" Margin="0,8,0,0"/>
+            <NumericUpDown Value="{Binding SelectedFontSize}"
+                            Minimum="6"
+                            Maximum="72"
+                            Increment="1"
+                            FormatString="0"
+                            HorizontalAlignment="Left"
+                            Width="120"/>
+
+            <TextBlock Text="SQL formatting" FontWeight="SemiBold" Margin="0,8,0,0"/>
+            <CheckBox IsChecked="{Binding SelectedOpeningParenOnNewLine}">
+                <TextBlock Text="Put the opening parenthesis of CREATE TABLE / INSERT column lists on its own line"
+                           TextWrapping="Wrap"
+                           MaxWidth="340"/>
+            </CheckBox>
         </StackPanel>
     </DockPanel>
 

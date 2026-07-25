@@ -21,9 +21,14 @@ public partial class SettingsView : Window
 
 	private void OnSaveClick(object? sender, RoutedEventArgs e)
 	{
-		if (DataContext is SettingsViewModel viewModel && !string.IsNullOrWhiteSpace(viewModel.SelectedFont))
+		if (DataContext is SettingsViewModel viewModel)
 		{
-			FontSettingsService.ApplyAndSave(viewModel.SelectedFont);
+			if (!string.IsNullOrWhiteSpace(viewModel.SelectedFont))
+			{
+				FontSettingsService.ApplyAndSave(viewModel.SelectedFont, viewModel.SelectedFontSize);
+			}
+
+			FormattingSettingsService.ApplyAndSave(viewModel.SelectedOpeningParenOnNewLine);
 		}
 
 		Close();

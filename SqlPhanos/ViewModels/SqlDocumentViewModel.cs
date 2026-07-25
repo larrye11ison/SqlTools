@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
 using SqlPhanos.Messages;
+using SqlPhanos.Services;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
@@ -111,7 +112,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         SchemaName = schemaName;
         ObjectName = objectName;
         OriginalSqlText = content;
-        FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content);
+        FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content, FormattingSettingsService.OpeningParenOnNewLine);
         CurrentSqlText = OriginalSqlText;
         DisplayMode = SqlDisplayMode.Original;
         Title = $"{schemaName}.{objectName}";

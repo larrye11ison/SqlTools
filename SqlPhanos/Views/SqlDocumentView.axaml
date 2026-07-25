@@ -81,7 +81,6 @@
         </Border>
 
         <editor:TextEditor x:Name="Editor"
-                           FontSize="16"
                            IsReadOnly="True"
                            ShowLineNumbers="True"
                            WordWrap="False"

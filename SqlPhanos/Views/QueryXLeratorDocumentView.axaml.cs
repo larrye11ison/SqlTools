@@ -33,8 +33,8 @@ public partial class QueryXLeratorDocumentView : UserControl
 		ActualThemeVariantChanged += (_, _) => ApplyTheme();
 
 		ApplyFont();
-		FontSettingsService.FontFamilyChanged += OnFontFamilyChanged;
-		DetachedFromVisualTree += (_, _) => FontSettingsService.FontFamilyChanged -= OnFontFamilyChanged;
+		FontSettingsService.SettingsChanged += OnFontSettingsChanged;
+		DetachedFromVisualTree += (_, _) => FontSettingsService.SettingsChanged -= OnFontSettingsChanged;
 	}
 
 	private void InitializeComponent()
@@ -78,7 +78,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 		}
 	}
 
-	private void OnFontFamilyChanged(object? sender, EventArgs e)
+	private void OnFontSettingsChanged(object? sender, EventArgs e)
 	{
 		ApplyFont();
 	}
@@ -88,6 +88,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 		if (_editor is not null)
 		{
 			_editor.FontFamily = new FontFamily(FontSettingsService.CurrentFontFamily);
+			_editor.FontSize = FontSettingsService.CurrentFontSize;
 		}
 	}
 

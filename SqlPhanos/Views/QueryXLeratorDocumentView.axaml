@@ -60,7 +60,6 @@
             </Border>
 
             <editor:TextEditor x:Name="Editor"
-                               FontSize="16"
                                ShowLineNumbers="True"
                                WordWrap="False"
                                HorizontalScrollBarVisibility="Auto"
