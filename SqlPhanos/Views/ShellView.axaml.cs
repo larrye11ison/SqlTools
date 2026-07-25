@@ -136,13 +136,13 @@ public partial class ShellView : Window
 
     private void OnCyclePaneClick(object? sender, RoutedEventArgs e) => FocusNextPane();
 
-    // Returns whichever MDI document view (SqlDocumentView or QueryXLeratorDocumentView) is
-    // currently active, or null if none is / no document is open.
+    // Returns whichever MDI document view (SqlDocumentView, QueryXLeratorDocumentView, or
+    // ScriptDatabasesDocumentView) is currently active, or null if none is / no document is open.
     private Control? GetActiveDocumentView()
     {
         return this.GetVisualDescendants()
             .OfType<Control>()
-            .FirstOrDefault(v => v is (SqlDocumentView or QueryXLeratorDocumentView) && v.IsEffectivelyVisible);
+            .FirstOrDefault(v => v is (SqlDocumentView or QueryXLeratorDocumentView or ScriptDatabasesDocumentView) && v.IsEffectivelyVisible);
     }
 
     private void OnAnyGotFocus(object? sender, FocusChangedEventArgs e)
@@ -162,7 +162,8 @@ public partial class ShellView : Window
             paneId = "Search";
         }
         else if (visual.FindAncestorOfType<SqlDocumentView>(includeSelf: true) is not null ||
-                 visual.FindAncestorOfType<QueryXLeratorDocumentView>(includeSelf: true) is not null)
+                 visual.FindAncestorOfType<QueryXLeratorDocumentView>(includeSelf: true) is not null ||
+                 visual.FindAncestorOfType<ScriptDatabasesDocumentView>(includeSelf: true) is not null)
         {
             paneId = "Documents";
         }
@@ -227,6 +228,9 @@ public partial class ShellView : Window
                 break;
             case QueryXLeratorDocumentView queryView:
                 queryView.FocusEditor();
+                break;
+            case ScriptDatabasesDocumentView scriptDatabasesView:
+                scriptDatabasesView.FocusDefault();
                 break;
         }
     }

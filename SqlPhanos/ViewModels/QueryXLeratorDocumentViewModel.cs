@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
+using SqlPhanos.Enums;
 using SqlPhanos.QueryXLerator;
 using SqlPhanos.Services;
 using System;
@@ -41,6 +42,7 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 
 	[ObservableProperty]
 	[NotifyPropertyChangedFor(nameof(CanRunQuery))]
+	[NotifyPropertyChangedFor(nameof(TabIconState))]
 	[NotifyCanExecuteChangedFor(nameof(ExecuteCommand))]
 	[NotifyCanExecuteChangedFor(nameof(CancelCommand))]
 	private bool _isRunning;
@@ -52,6 +54,7 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 	private string _durationText = "";
 
 	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(TabIconState))]
 	private bool _isInErrorState;
 
 	[ObservableProperty]
@@ -69,6 +72,11 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 	public string TabHeaderLine1 => ConnectionDisplayName;
 
 	public string TabHeaderLine2 => "Ad-hoc Query";
+
+	public DocumentTabIconState TabIconState =>
+		IsRunning ? DocumentTabIconState.Busy :
+		IsInErrorState ? DocumentTabIconState.Error :
+		DocumentTabIconState.None;
 
 	// Parameterless constructor exists only for the XAML Design.DataContext tag, matching the
 	// same pattern SqlDocumentViewModel already uses for the same reason.

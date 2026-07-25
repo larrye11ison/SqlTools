@@ -7,16 +7,6 @@
              x:Class="SqlPhanos.Views.SearchResultsView"
              x:DataType="vm:SearchResultsViewModel">
 
-    <UserControl.Styles>
-        <!-- The Cancel button always occupies its layout space so the Script button never
-             shifts position when scripting starts/stops; only its visual appearance and
-             hit-testing toggle. -->
-        <Style Selector="Button.scriptRowCancelHidden">
-            <Setter Property="Opacity" Value="0" />
-            <Setter Property="IsHitTestVisible" Value="False" />
-        </Style>
-    </UserControl.Styles>
-
     <Grid RowDefinitions="Auto,*">
         <!-- Filter controls: stacked vertically since this panel is intentionally narrow.
              General filter gets a full-width row since it's the one most commonly used;
@@ -78,15 +68,9 @@
                                     Spacing="4"
                                     HorizontalAlignment="Right"
                                     Margin="0,4,0,0">
-                            <Button Content="{Binding ScriptButtonLabel}"
+                            <Button Content="Script"
                                     Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     CommandParameter="{Binding}"
-                                    IsEnabled="{Binding CanScriptObject}"
-                                    Padding="6,3"
-                                    FontSize="12"/>
-                            <Button Content="Cancel"
-                                    Command="{Binding CancelScriptingCommand}"
-                                    Classes.scriptRowCancelHidden="{Binding !IsScripting}"
                                     Padding="6,3"
                                     FontSize="12"/>
                         </StackPanel>

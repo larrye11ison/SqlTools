@@ -27,8 +27,33 @@
     </UserControl.Styles>
 
     <DockPanel>
+        <!-- Scripting-in-progress banner: this document opens immediately (busy tab icon) and
+             scripts itself, so this is the only place progress/cancel is shown - the Search
+             Results pane that used to own this no longer tracks per-row scripting state. -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding IsScripting}"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Scripting..." VerticalAlignment="Center"/>
+                <Button Command="{Binding CancelScriptingCommand}" Content="Cancel"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding IsInErrorState}"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                BorderBrush="Red"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="IndianRed" TextWrapping="Wrap"/>
+        </Border>
+
         <!-- Header bar -->
         <Border DockPanel.Dock="Top"
+                IsVisible="{Binding !IsScripting}"
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="12,8">
             <StackPanel Orientation="Horizontal" Spacing="8">

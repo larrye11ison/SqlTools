@@ -4,6 +4,7 @@
         xmlns:views="using:SqlPhanos.Views"
         xmlns:dock="clr-namespace:Dock.Avalonia.Controls;assembly=Dock.Avalonia"
         xmlns:enums="using:SqlPhanos.Enums"
+        xmlns:conv="using:Avalonia.Data.Converters"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
@@ -43,24 +44,49 @@
 
              Two separate Style blocks, not one comma-combined selector: a combined selector
              resolves the Setter's target property against the selectors' common base type
-             (TemplatedControl), which doesn't have HeaderTemplate and fails to compile. -->
+             (TemplatedControl), which doesn't have HeaderTemplate and fails to compile.
+
+             The header is now a 2-column Grid: column 0 a fixed-size status icon slot (the
+             document itself decides which state applies, via IHasTabHeaderLines.TabIconState -
+             plain vector shapes, no image assets/animation, satisfying "not animated"), column 1
+             the two-line text stack unchanged from before. The icon naturally spans the full
+             row height since it's a sibling column to the whole two-line stack, not an
+             overlapping row. -->
         <Style Selector="dock|DocumentControl">
             <Setter Property="HeaderTemplate">
                 <DataTemplate DataType="vm:IHasTabHeaderLines">
-                    <StackPanel Margin="0,2">
-                        <TextBlock Text="{Binding TabHeaderLine1}" FontSize="10" Opacity="0.75"/>
-                        <TextBlock Text="{Binding TabHeaderLine2}" FontSize="12" FontWeight="SemiBold"/>
-                    </StackPanel>
+                    <Grid ColumnDefinitions="16,Auto" Margin="0,2">
+                        <Grid Grid.Column="0" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Ellipse Fill="Orange" IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Busy}}"/>
+                            <Ellipse Fill="Red" IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Error}}"/>
+                            <TextBlock Text="✕" FontSize="10" FontWeight="Bold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Error}}"/>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                            <TextBlock Text="{Binding TabHeaderLine1}" FontSize="10" Opacity="0.75"/>
+                            <TextBlock Text="{Binding TabHeaderLine2}" FontSize="12" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Grid>
                 </DataTemplate>
             </Setter>
         </Style>
         <Style Selector="dock|MdiDocumentControl">
             <Setter Property="HeaderTemplate">
                 <DataTemplate DataType="vm:IHasTabHeaderLines">
-                    <StackPanel Margin="0,2">
-                        <TextBlock Text="{Binding TabHeaderLine1}" FontSize="10" Opacity="0.75"/>
-                        <TextBlock Text="{Binding TabHeaderLine2}" FontSize="12" FontWeight="SemiBold"/>
-                    </StackPanel>
+                    <Grid ColumnDefinitions="16,Auto" Margin="0,2">
+                        <Grid Grid.Column="0" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Ellipse Fill="Orange" IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Busy}}"/>
+                            <Ellipse Fill="Red" IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Error}}"/>
+                            <TextBlock Text="✕" FontSize="10" FontWeight="Bold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       IsVisible="{Binding TabIconState, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static enums:DocumentTabIconState.Error}}"/>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                            <TextBlock Text="{Binding TabHeaderLine1}" FontSize="10" Opacity="0.75"/>
+                            <TextBlock Text="{Binding TabHeaderLine2}" FontSize="12" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Grid>
                 </DataTemplate>
             </Setter>
         </Style>
