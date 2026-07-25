@@ -17,12 +17,14 @@ public enum SqlDisplayMode
 /// <summary>
 /// View model for a single SQL script document
 /// </summary>
-public partial class SqlDocumentViewModel : Document
+public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 {
     private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
     private string _currentSqlText = "";
     private SqlDisplayMode _displayMode = SqlDisplayMode.Original;
-    private string _filePath = "";
+    private string _dbName = "";
+    private string _schemaName = "";
+    private string _objectName = "";
     private string _formattedSqlText = "";
     private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
@@ -33,11 +35,30 @@ public partial class SqlDocumentViewModel : Document
         private set => SetProperty(ref _currentSqlText, value);
     }
 
-    public string FilePath
+    public string DbName
     {
-        get => _filePath;
-        private set => SetProperty(ref _filePath, value);
+        get => _dbName;
+        private set => SetProperty(ref _dbName, value);
     }
+
+    public string SchemaName
+    {
+        get => _schemaName;
+        private set => SetProperty(ref _schemaName, value);
+    }
+
+    public string ObjectName
+    {
+        get => _objectName;
+        private set => SetProperty(ref _objectName, value);
+    }
+
+    // IHasTabHeaderLines - backs the shared DocumentTabStrip.HeaderTemplate (see
+    // ShellView.axaml), which replaces the object-name text that used to be repeated in this
+    // document's own header bar.
+    public string TabHeaderLine1 => DbName;
+
+    public string TabHeaderLine2 => $"{SchemaName}.{ObjectName}";
 
     public string FormattedSqlText
     {
@@ -67,7 +88,6 @@ public partial class SqlDocumentViewModel : Document
         {
             if (SetProperty(ref _displayMode, value))
             {
-                OnPropertyChanged(nameof(DisplayModeLabel));
                 OnPropertyChanged(nameof(IsShowingOriginal));
                 OnPropertyChanged(nameof(IsShowingFormatted));
             }
@@ -78,12 +98,6 @@ public partial class SqlDocumentViewModel : Document
 
     public bool IsShowingFormatted => DisplayMode == SqlDisplayMode.Formatted;
 
-    public string DisplayModeLabel => DisplayMode switch
-    {
-        SqlDisplayMode.Formatted => "Formatted SQL",
-        _ => "Original SQL",
-    };
-
     public string SyntaxScopeName => "source.sql";
 
     public SqlDocumentViewModel()
@@ -91,14 +105,16 @@ public partial class SqlDocumentViewModel : Document
         Title = "SQL Script";
     }
 
-    public SqlDocumentViewModel(string filePath, string content, string title)
+    public SqlDocumentViewModel(string dbName, string schemaName, string objectName, string content)
     {
-        FilePath = filePath;
+        DbName = dbName;
+        SchemaName = schemaName;
+        ObjectName = objectName;
         OriginalSqlText = content;
         FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content);
         CurrentSqlText = OriginalSqlText;
         DisplayMode = SqlDisplayMode.Original;
-        Title = title;
+        Title = $"{schemaName}.{objectName}";
     }
 
     [RelayCommand]

@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Mvvm.Controls;
+using SqlPhanos.CodeFormatting;
 using SqlPhanos.QueryXLerator;
 using System;
 using System.Collections.Generic;
@@ -18,8 +19,9 @@ namespace SqlPhanos.ViewModels;
 /// model reused, mechanism rewritten to use CommunityToolkit.Mvvm like every other ViewModel
 /// in this app instead of the original's hand-rolled INotifyPropertyChanged).
 /// </summary>
-public partial class QueryXLeratorDocumentViewModel : Document
+public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLines
 {
+	private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
 	private readonly string _connectionString;
 
 	private CancellationTokenSource? _cancellationTokenSource;
@@ -62,6 +64,11 @@ public partial class QueryXLeratorDocumentViewModel : Document
 
 	public string SyntaxScopeName => "source.sql";
 
+	// IHasTabHeaderLines - see SqlDocumentViewModel's identical implementation for why.
+	public string TabHeaderLine1 => ConnectionDisplayName;
+
+	public string TabHeaderLine2 => "Ad-hoc Query";
+
 	// Parameterless constructor exists only for the XAML Design.DataContext tag, matching the
 	// same pattern SqlDocumentViewModel already uses for the same reason.
 	public QueryXLeratorDocumentViewModel()
@@ -76,6 +83,17 @@ public partial class QueryXLeratorDocumentViewModel : Document
 		_connectionString = connectionString;
 		ConnectionDisplayName = connectionDisplayName;
 		Title = $"Query - {connectionDisplayName}";
+	}
+
+	[RelayCommand]
+	private void Reformat()
+	{
+		if (string.IsNullOrWhiteSpace(QueryText))
+		{
+			return;
+		}
+
+		QueryText = _sqlCanonicalizationService.FormatForDisplay(QueryText);
 	}
 
 	[RelayCommand(CanExecute = nameof(CanRunQuery))]

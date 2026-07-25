@@ -44,6 +44,9 @@
                         <CheckBox Content="Include empty result sets"
                                   IsChecked="{Binding IncludeEmptyResultSets}"
                                   VerticalAlignment="Center"/>
+                        <Button Content="Reformat"
+                                Command="{Binding ReformatCommand}"
+                                ToolTip.Tip="Reformat the query text (Ctrl+M)"/>
                         <Button Content="Execute"
                                 Command="{Binding ExecuteCommand}"
                                 IsEnabled="{Binding CanRunQuery}"/>
