@@ -15,8 +15,12 @@
     <UserControl.Styles>
         <!-- The currently-active mode's button is disabled (clicking it would be a no-op),
              but disabled+grayed alone reads as "unavailable" rather than "this is what
-             you're looking at" - a heavier border on top makes the active selection obvious. -->
-        <Style Selector="Button.active">
+             you're looking at" - a heavier border on top makes the active selection obvious.
+             This targets a wrapper Border rather than the Button itself: confirmed via a
+             standalone repro that Fluent's disabled-button styling forces the button's own
+             internal ContentPresenter.BorderBrush to Transparent (thickness gets through,
+             brush doesn't), which silently ate a Button-targeted version of this style. -->
+        <Style Selector="Border.active">
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
         </Style>
@@ -28,15 +32,17 @@
                 Background="{DynamicResource SystemAccentColor}"
                 Padding="12,8">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Command="{Binding ShowOriginalCommand}"
-                        Content="Original"
-                        IsEnabled="{Binding !IsShowingOriginal}"
-                        Classes.active="{Binding IsShowingOriginal}"/>
+                <Border CornerRadius="4" Classes.active="{Binding IsShowingOriginal}">
+                    <Button Command="{Binding ShowOriginalCommand}"
+                            Content="Original"
+                            IsEnabled="{Binding !IsShowingOriginal}"/>
+                </Border>
 
-                <Button Command="{Binding ShowFormattedCommand}"
-                        Content="Reformatted"
-                        IsEnabled="{Binding !IsShowingFormatted}"
-                        Classes.active="{Binding IsShowingFormatted}"/>
+                <Border CornerRadius="4" Classes.active="{Binding IsShowingFormatted}">
+                    <Button Command="{Binding ShowFormattedCommand}"
+                            Content="Reformatted"
+                            IsEnabled="{Binding !IsShowingFormatted}"/>
+                </Border>
             </StackPanel>
         </Border>
 
