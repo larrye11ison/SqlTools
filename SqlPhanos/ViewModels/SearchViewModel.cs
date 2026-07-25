@@ -216,6 +216,7 @@ namespace SqlPhanos.ViewModels
 				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script.Length}");
 
 				var doc = new SqlDocumentViewModel(
+					result.ServerName,
 					result.DbName,
 					result.SchemaName,
 					result.ObjectName,

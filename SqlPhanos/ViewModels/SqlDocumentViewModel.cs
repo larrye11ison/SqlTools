@@ -23,6 +23,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
     private string _currentSqlText = "";
     private SqlDisplayMode _displayMode = SqlDisplayMode.Original;
+    private string _serverName = "";
     private string _dbName = "";
     private string _schemaName = "";
     private string _objectName = "";
@@ -34,6 +35,12 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         get => _currentSqlText;
         private set => SetProperty(ref _currentSqlText, value);
+    }
+
+    public string ServerName
+    {
+        get => _serverName;
+        private set => SetProperty(ref _serverName, value);
     }
 
     public string DbName
@@ -57,7 +64,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     // IHasTabHeaderLines - backs the shared DocumentTabStrip.HeaderTemplate (see
     // ShellView.axaml), which replaces the object-name text that used to be repeated in this
     // document's own header bar.
-    public string TabHeaderLine1 => DbName;
+    public string TabHeaderLine1 => $"{ServerName} | {DbName}";
 
     public string TabHeaderLine2 => $"{SchemaName}.{ObjectName}";
 
@@ -106,8 +113,9 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         Title = "SQL Script";
     }
 
-    public SqlDocumentViewModel(string dbName, string schemaName, string objectName, string content)
+    public SqlDocumentViewModel(string serverName, string dbName, string schemaName, string objectName, string content)
     {
+        ServerName = serverName;
         DbName = dbName;
         SchemaName = schemaName;
         ObjectName = objectName;
