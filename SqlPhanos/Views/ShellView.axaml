@@ -29,10 +29,32 @@
              once as the doc's Title, again (schema-less) as its FilePath - on top of the
              literal tab strip already showing it. This replaces that with a two-line tab
              header instead: line 1 the database/connection, line 2 schema.objectname (or the
-             equivalent for other document types - see IHasTabHeaderLines). HeaderTemplate is
-             DocumentTabStrip's own sanctioned customization point (Dock.Avalonia source),
-             not a themed-control override. -->
-        <Style Selector="dock|DocumentTabStrip">
+             equivalent for other document types - see IHasTabHeaderLines).
+
+             This targets DocumentControl/MdiDocumentControl, NOT DocumentTabStrip directly -
+             confirmed via Dock.Avalonia's own source that both host controls wire their
+             internal DocumentTabStrip.HeaderTemplate via TemplateBinding back to their own
+             HeaderTemplate property. A TemplateBinding resolves to a local value (even when
+             it evaluates to null), which takes precedence over a Style setter on the inner
+             DocumentTabStrip - so a DocumentTabStrip-targeted style silently loses. Setting
+             HeaderTemplate on the outer control is what actually flows down - confirmed via a
+             standalone repro using the real Dock.Model.Mvvm.Controls.DocumentDock/Document
+             types nested the same way ShellView's own DockFactory nests them.
+
+             Two separate Style blocks, not one comma-combined selector: a combined selector
+             resolves the Setter's target property against the selectors' common base type
+             (TemplatedControl), which doesn't have HeaderTemplate and fails to compile. -->
+        <Style Selector="dock|DocumentControl">
+            <Setter Property="HeaderTemplate">
+                <DataTemplate DataType="vm:IHasTabHeaderLines">
+                    <StackPanel Margin="0,2">
+                        <TextBlock Text="{Binding TabHeaderLine1}" FontSize="10" Opacity="0.75"/>
+                        <TextBlock Text="{Binding TabHeaderLine2}" FontSize="12" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </DataTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="dock|MdiDocumentControl">
             <Setter Property="HeaderTemplate">
                 <DataTemplate DataType="vm:IHasTabHeaderLines">
                     <StackPanel Margin="0,2">
