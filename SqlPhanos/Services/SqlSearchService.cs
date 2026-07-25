@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.Data;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Management.Common;
+using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Smo;
+using SqlPhanos.ScriptDatabases;
 using SqlPhanos.ViewModels;
 
 namespace SqlPhanos.Services;
@@ -155,7 +155,17 @@ public class SqlSearchService
         return databases;
     }
 
-    public async Task<string> ScriptObjectAsync(string connectionString, SearchResultViewModel result, CancellationToken cancellationToken = default)
+    // Shared with Script Databases (see SqlPhanos.ScriptDatabases.ScriptingOptionsFactory /
+    // SingleObjectScriptingService) so both entry points produce identical output - the only
+    // sanctioned difference is that Script Databases' header also carries Created/Last Mod
+    // dates (used for Delta-mode change detection), which don't apply to a single interactively
+    // opened object. Encrypted objects are decrypted via the read-only RC4/DAC technique
+    // (EncryptedModuleDecryptor) only - never by executing an ALTER against the live object.
+    public async Task<string> ScriptObjectAsync(
+        string connectionString,
+        SearchResultViewModel result,
+        bool allowEncryptedModuleDecrypt = false,
+        CancellationToken cancellationToken = default)
     {
         return await Task.Run(() =>
         {
@@ -165,6 +175,17 @@ public class SqlSearchService
             {
                 InitialCatalog = result.DbName
             };
+
+            if (result.IsEncrypted)
+            {
+                return SingleObjectScriptingService.ScriptEncryptedObject(
+                    builder.ConnectionString,
+                    result.SchemaName,
+                    result.ObjectName,
+                    result.ServerName,
+                    result.DbName,
+                    allowEncryptedModuleDecrypt);
+            }
 
             var connInfo = new SqlConnectionInfo();
             connInfo.ServerName = builder.DataSource;
@@ -188,61 +209,33 @@ public class SqlSearchService
                 var database = server.Databases[result.DbName];
                 if (database == null) return "-- Database not found";
 
-                ScriptingOptions options = new ScriptingOptions
-                {
-                    ScriptDrops = false,
-                    IncludeIfNotExists = false,
-                    ScriptForCreateOrAlter = true,
-                    EnforceScriptingOptions = true,
-                    TargetServerVersion = SqlServerVersion.Version150,
-                    TargetDatabaseEngineType = DatabaseEngineType.Standalone,
-                    ClusteredIndexes = true,
-                    DriAll = true,
-                    Indexes = true,
-                    // Scripting a table must produce only the table, not every trigger attached
-                    // to it - triggers are scripted independently as their own first-class
-                    // object type (see the SQL_TRIGGER case below).
-                    Triggers = false,
-                    ScriptSchema = true,
-                    ScriptData = false,
-                    Permissions = true
-                };
-
-                var sb = new StringBuilder();
-                sb.AppendLine($"-- Scripting object: {result.SchemaName}.{result.ObjectName}");
-                sb.AppendLine($"-- Type: {result.TypeDesc}");
-                sb.AppendLine($"-- Server: {result.ServerName}");
-                sb.AppendLine($"-- Database: {result.DbName}");
-                sb.AppendLine($"USE [{result.DbName.Replace("]", "]]")}];");
-                sb.AppendLine();
-                sb.AppendLine("GO");
-
                 cancellationToken.ThrowIfCancellationRequested();
 
-                StringCollection? sc = null;
+                Urn? urn = null;
+                string? notFoundMessage = null;
 
                 switch (result.TypeDesc)
                 {
                     case "USER_TABLE":
                         if (database.Tables.Contains(result.ObjectName, result.SchemaName))
-                            sc = database.Tables[result.ObjectName, result.SchemaName].Script(options);
+                            urn = database.Tables[result.ObjectName, result.SchemaName].Urn;
                         break;
 
                     case "SQL_STORED_PROCEDURE":
                         if (database.StoredProcedures.Contains(result.ObjectName, result.SchemaName))
-                            sc = database.StoredProcedures[result.ObjectName, result.SchemaName].Script(options);
+                            urn = database.StoredProcedures[result.ObjectName, result.SchemaName].Urn;
                         break;
 
                     case "VIEW":
                         if (database.Views.Contains(result.ObjectName, result.SchemaName))
-                            sc = database.Views[result.ObjectName, result.SchemaName].Script(options);
+                            urn = database.Views[result.ObjectName, result.SchemaName].Urn;
                         break;
 
                     case "SQL_SCALAR_FUNCTION":
                     case "SQL_TABLE_VALUED_FUNCTION":
                     case "SQL_INLINE_TABLE_VALUED_FUNCTION":
                         if (database.UserDefinedFunctions.Contains(result.ObjectName, result.SchemaName))
-                            sc = database.UserDefinedFunctions[result.ObjectName, result.SchemaName].Script(options);
+                            urn = database.UserDefinedFunctions[result.ObjectName, result.SchemaName].Urn;
                         break;
 
                     case "SQL_TRIGGER":
@@ -253,44 +246,42 @@ public class SqlSearchService
                         if (database.Tables.Contains(result.ParentFqName, result.SchemaName) &&
                             database.Tables[result.ParentFqName, result.SchemaName].Triggers.Contains(result.ObjectName))
                         {
-                            sc = database.Tables[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Script(options);
+                            urn = database.Tables[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Urn;
                         }
                         else if (database.Views.Contains(result.ParentFqName, result.SchemaName) &&
                                  database.Views[result.ParentFqName, result.SchemaName].Triggers.Contains(result.ObjectName))
                         {
-                            sc = database.Views[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Script(options);
+                            urn = database.Views[result.ParentFqName, result.SchemaName].Triggers[result.ObjectName].Urn;
                         }
                         else
                         {
-                            sb.AppendLine($"-- Trigger's parent object '{result.SchemaName}.{result.ParentFqName}' was not found among tables or views.");
+                            notFoundMessage = $"-- Trigger's parent object '{result.SchemaName}.{result.ParentFqName}' was not found among tables or views.";
                         }
                         break;
 
                     default:
-                        sb.AppendLine($"-- Scripting not implemented for type: {result.TypeDesc}");
+                        notFoundMessage = $"-- Scripting not implemented for type: {result.TypeDesc}";
                         break;
                 }
 
-                if (sc != null)
+                if (urn is null)
                 {
-                    foreach (var s in sc)
-                    {
-                        sb.AppendLine(s);
-                        sb.AppendLine("GO");
-                    }
-                }
-                else if (result.TypeDesc != "USER_TABLE" && !string.IsNullOrEmpty(result.TypeDesc)) // Fallback for some types if not found in collections
-                {
-                    sb.AppendLine("-- Object not found in SMO collections.");
+                    return notFoundMessage ?? "-- Object not found in SMO collections.";
                 }
 
-                if (result.IsEncrypted)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    AppendDecryptionAttempt(sb, builder.ConnectionString, result);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
-                return sb.ToString();
+                // A trigger opened directly is its own standalone object here, regardless of
+                // result.TypeDesc - it must not also embed itself via a parent table/view script,
+                // so triggers are never embedded inline in this path (unlike Script Databases,
+                // which has no other way to reach a table's triggers at all).
+                return SingleObjectScriptingService.ScriptResolvedObject(
+                    server,
+                    urn,
+                    result.ObjectName,
+                    result.ServerName,
+                    result.DbName,
+                    includeTriggersInTableScript: false);
             }
             catch (OperationCanceledException)
             {
@@ -305,38 +296,6 @@ public class SqlSearchService
                 serverConnection.Disconnect();
             }
         }, cancellationToken);
-    }
-
-    // SQL Server never exposes an encrypted object's definition through sys.sql_modules or
-    // SMO, to anyone, regardless of permissions - that's the whole point of WITH ENCRYPTION.
-    // EncryptedObjectDecryptionService's best-effort recovery is the only way to get the text
-    // back, and only for object types where reconstructing a valid ALTER needs nothing beyond
-    // the schema-qualified name (see its class comment for the full scope/caveats).
-    private static void AppendDecryptionAttempt(StringBuilder sb, string connectionString, SearchResultViewModel result)
-    {
-        sb.AppendLine();
-
-        if (!EncryptedObjectDecryptionService.IsSupportedType(result.TypeDesc))
-        {
-            sb.AppendLine($"-- Object is encrypted (WITH ENCRYPTION). Automatic decryption is only implemented for");
-            sb.AppendLine($"-- stored procedures and views, not '{result.TypeDesc}'.");
-            return;
-        }
-
-        var decrypted = EncryptedObjectDecryptionService.TryDecrypt(connectionString, result.TypeDesc, result.SchemaName, result.ObjectName);
-        if (decrypted is null)
-        {
-            sb.AppendLine("-- Object is encrypted (WITH ENCRYPTION). Automatic decryption was attempted but failed -");
-            sb.AppendLine("-- this requires sysadmin rights, the Dedicated Admin Connection (DAC) enabled on the");
-            sb.AppendLine("-- server, and ALTER permission on the object.");
-            return;
-        }
-
-        sb.AppendLine("-- The definition below was recovered from a WITH ENCRYPTION object using a known-plaintext");
-        sb.AppendLine("-- XOR recovery technique (see EncryptedObjectDecryptionService). This is a best-effort,");
-        sb.AppendLine("-- unofficial recovery, not a supported SQL Server feature - verify it carefully before use.");
-        sb.AppendLine(decrypted);
-        sb.AppendLine("GO");
     }
 
     public async Task<List<SearchResultViewModel>> SearchDatabaseAsync(

@@ -489,30 +489,12 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
 
     private static Scripter CreateScripter(Server server)
     {
+        // includeTriggersInTableScript: true - there's no separate Trigger entry in
+        // SqlObjectFilters.GetScriptedObjectTypes(), so a table's triggers only ever appear at
+        // all if embedded in the table's own script here.
         return new Scripter(server)
         {
-            Options = new ScriptingOptions
-            {
-                DriAll = true,
-                // Without this, SMO silently omits the CONSTRAINT [name] clause for any
-                // constraint that was never explicitly named - it just scripts the bare
-                // "PRIMARY KEY (...)"/"DEFAULT (...)"/etc, since (from SMO's point of view) the
-                // system-generated name isn't meaningful. Always on rather than tied to the
-                // normalize-names checkbox: this app has limited usage and is still in beta, so
-                // the simpler, more complete/faithful script (always showing the real current
-                // name) wins over guarding the default output against a diff-noise scenario that
-                // may never come up for most users.
-                DriIncludeSystemNames = true,
-                Indexes = true,
-                IncludeDatabaseContext = true,
-                IncludeDatabaseRoleMemberships = true,
-                Triggers = true,
-                Permissions = true,
-                ScriptBatchTerminator = true,
-                SchemaQualify = true,
-                ScriptForCreateOrAlter = true,
-                EnforceScriptingOptions = true
-            }
+            Options = ScriptingOptionsFactory.Create(includeTriggersInTableScript: true)
         };
     }
 
@@ -543,19 +525,12 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
 
     private static string BuildObjectHeader(ObjectHeaderRequest request)
     {
-        string nl = Environment.NewLine;
-        string quotedDatabase = request.Session.ActualDatabaseName.Replace("]", "]]", StringComparison.Ordinal);
-        return
-            $"/*-------------------------------------------------------------------{nl}" +
-            $"     Object:     {request.ObjectName}{nl}" +
-            $"     Server:     {request.Session.ActualServerName}{nl}" +
-            $"     Database:   {request.Session.ActualDatabaseName}{nl}" +
-            $"     Scripted:   {ObjectCatalogue.FormatScriptedDate(request.ScriptedOn)}{nl}" +
-            $"     Created:    {ObjectCatalogue.FormatCatalogueDate(request.Dates.Created)}{nl}" +
-            $"     Last Mod:   {ObjectCatalogue.FormatCatalogueDate(request.Dates.LastModified)}{nl}" +
-            $"---------------------------------------------------------------------*/{nl}" +
-            $"USE [{quotedDatabase}]{nl}" +
-            $"GO{nl}{nl}";
+        return ObjectScriptHeaderBuilder.Build(
+            request.ObjectName,
+            request.Session.ActualServerName,
+            request.Session.ActualDatabaseName,
+            request.ScriptedOn,
+            request.Dates);
     }
 
     private sealed record LoadedDatabaseContext(

@@ -26,7 +26,8 @@
         </Style>
     </UserControl.Styles>
 
-    <DockPanel>
+    <Grid>
+    <DockPanel IsEnabled="{Binding !PendingEncryptedConsent}">
         <!-- Scripting-in-progress banner: this document opens immediately (busy tab icon) and
              scripts itself, so this is the only place progress/cancel is shown - the Search
              Results pane that used to own this no longer tracks per-row scripting state. -->
@@ -112,5 +113,32 @@
                            HorizontalScrollBarVisibility="Auto"
                            VerticalScrollBarVisibility="Auto"/>
     </DockPanel>
+
+    <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a DAC
+         connection, requires sysadmin), shown in-tab rather than as a modal dialog. Mirrors
+         ScriptDatabasesDocumentView's identical overlay for the bulk path. -->
+    <Grid IsVisible="{Binding PendingEncryptedConsent}" Background="#80000000">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="20"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MaxWidth="420">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Encrypted object detected" FontWeight="Bold" FontSize="16"/>
+                <TextBlock TextWrapping="Wrap">
+                    <Run Text="{Binding PendingEncryptedObjectName}"/>
+                    <Run Text=" is encrypted (WITH ENCRYPTION). Decrypting requires opening a Dedicated Administrator Connection (DAC / ADMIN:) and requires sysadmin (or equivalent) - for remote instances, 'remote admin connections' must be enabled. Nothing is altered or dropped on the server."/>
+                </TextBlock>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                    <Button Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent"/>
+                    <Button Command="{Binding DeclineDecryptCommand}" Content="Skip"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+    </Grid>
 
 </UserControl>
