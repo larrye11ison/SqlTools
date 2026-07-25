@@ -16,6 +16,88 @@ public sealed class SqlCanonicalizationServiceTests
 	public SqlCanonicalizationServiceTests(ITestOutputHelper output) => _output = output;
 
 	[Fact]
+	public void CreateTableAndInsertColumnListParenAreConsistentByDefault()
+	{
+		// Regression test: CREATE TABLE's column-list paren stayed glued to the same line
+		// while INSERT INTO's column-list paren was always forced onto its own line -
+		// inconsistent regardless of how the source SQL was formatted. Both must now agree
+		// on the default (same-line) placement, even when (as here) the INSERT source itself
+		// already had the paren on its own line - the formatter normalizes it.
+		var sql = """
+			CREATE TABLE #loanList (
+				CoreAssetID INT PRIMARY KEY CLUSTERED,
+				LoanID VARCHAR(10)
+			);
+
+			INSERT INTO #loanList
+			(
+				CoreAssetID,
+				LoanID
+			)
+			SELECT
+				x.CoreAssetID,
+				x.LoanID
+			FROM @loanList x;
+			""";
+		var expected = """
+			CREATE TABLE #loanList (
+				CoreAssetID INT PRIMARY KEY CLUSTERED,
+				LoanID VARCHAR(10)
+			);
+
+			INSERT INTO #loanList (
+				CoreAssetID,
+				LoanID
+			)
+			SELECT
+				x.CoreAssetID,
+				x.LoanID
+			FROM @loanList x;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void OpeningParenOnNewLineOptionAppliesToCreateTableAndInsertConsistently()
+	{
+		var sql = """
+			CREATE TABLE #loanList (
+				CoreAssetID INT PRIMARY KEY CLUSTERED,
+				LoanID VARCHAR(10)
+			);
+
+			INSERT INTO #loanList (
+				CoreAssetID,
+				LoanID
+			)
+			SELECT
+				x.CoreAssetID,
+				x.LoanID
+			FROM @loanList x;
+			""";
+		var expected = """
+			CREATE TABLE #loanList
+			(
+				CoreAssetID INT PRIMARY KEY CLUSTERED,
+				LoanID VARCHAR(10)
+			);
+
+			INSERT INTO #loanList
+			(
+				CoreAssetID,
+				LoanID
+			)
+			SELECT
+				x.CoreAssetID,
+				x.LoanID
+			FROM @loanList x;
+			""";
+
+		RunFactTest(sql, expected, openingParenOnNewLine: true);
+	}
+
+	[Fact]
 	public void ExecWithNamedParametersStartsOwnLineWithOneParamPerLine()
 	{
 		// EXEC/EXECUTE previously fell through to the default token handling entirely (no
@@ -898,8 +980,7 @@ public sealed class SqlCanonicalizationServiceTests
 	public void InsertBasicFormattedCorrectly()
 	{
 		var expected = """
-			INSERT INTO foo
-			(
+			INSERT INTO foo (
 				a,
 				b,
 				c
@@ -925,8 +1006,7 @@ public sealed class SqlCanonicalizationServiceTests
 		// list. Mirrors a real-world INSERT with a mix of @variables and expressions.
 		var sql = "INSERT INTO INTERACTION\n(\n\tCORE_ASSET_ID,\n\tOUTCOME_ID,\n\tINTERACTION_SUBJECT,\n\tDATE_TIME_MODIFIED,\n\tPERSON_MODIFYING_ID\n)\nVALUES\n(\n\t@CORE_ASSET_ID,\n\t@OUTCOME_ID,\n\tCOALESCE(@INTERACTION_SUBJECT, ''),\n\tGETDATE(),\n\t@PERSON_MODIFYING_ID\n)";
 		var expected = """
-			INSERT INTO INTERACTION
-			(
+			INSERT INTO INTERACTION (
 				CORE_ASSET_ID,
 				OUTCOME_ID,
 				INTERACTION_SUBJECT,
@@ -950,8 +1030,7 @@ public sealed class SqlCanonicalizationServiceTests
 	public void InsertWithSelectFormattedCorrectly()
 	{
 		var expected = """
-			INSERT INTO foo
-			(
+			INSERT INTO foo (
 				a,
 				b,
 				c
@@ -1351,6 +1430,16 @@ public sealed class SqlCanonicalizationServiceTests
 		var normalizedExpected = NormalizeExpectedForComparison(expected);
 		var sql = NormalizeWhitespace(sqlInput);
 		var formatted = service.FormatForDisplay(sql);
+		WriteStringDiff(normalizedExpected, formatted);
+		Assert.Equal(normalizedExpected, formatted);
+		return formatted;
+	}
+
+	private string RunFactTest(string sqlInput, string expected, bool openingParenOnNewLine)
+	{
+		var normalizedExpected = NormalizeExpectedForComparison(expected);
+		var sql = NormalizeWhitespace(sqlInput);
+		var formatted = service.FormatForDisplay(sql, openingParenOnNewLine);
 		WriteStringDiff(normalizedExpected, formatted);
 		Assert.Equal(normalizedExpected, formatted);
 		return formatted;

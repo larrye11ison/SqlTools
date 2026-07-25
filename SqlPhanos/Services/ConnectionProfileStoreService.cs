@@ -78,6 +78,32 @@ public sealed class ConnectionProfileStoreService
 		WriteStore(store);
 	}
 
+	public double? LoadFontSize()
+	{
+		return LoadStore()?.FontSize;
+	}
+
+	public void SaveFontSize(double fontSize)
+	{
+		// Read-modify-write, same reasoning as SaveFontFamily.
+		var store = LoadStore() ?? new ConnectionProfileStore();
+		store.FontSize = fontSize;
+		WriteStore(store);
+	}
+
+	public bool? LoadOpeningParenOnNewLine()
+	{
+		return LoadStore()?.OpeningParenOnNewLine;
+	}
+
+	public void SaveOpeningParenOnNewLine(bool openingParenOnNewLine)
+	{
+		// Read-modify-write, same reasoning as SaveFontFamily.
+		var store = LoadStore() ?? new ConnectionProfileStore();
+		store.OpeningParenOnNewLine = openingParenOnNewLine;
+		WriteStore(store);
+	}
+
 	private ConnectionProfileStore? LoadStore()
 	{
 		if (!File.Exists(_filePath))

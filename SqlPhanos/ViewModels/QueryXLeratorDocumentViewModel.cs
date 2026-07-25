@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
 using SqlPhanos.QueryXLerator;
+using SqlPhanos.Services;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -93,7 +94,7 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 			return;
 		}
 
-		QueryText = _sqlCanonicalizationService.FormatForDisplay(QueryText);
+		QueryText = _sqlCanonicalizationService.FormatForDisplay(QueryText, FormattingSettingsService.OpeningParenOnNewLine);
 	}
 
 	[RelayCommand(CanExecute = nameof(CanRunQuery))]
