@@ -13,13 +13,13 @@
     </Design.DataContext>
 
     <UserControl.Styles>
-        <!-- The currently-active mode's button is disabled (clicking it would be a no-op),
-             but disabled+grayed alone reads as "unavailable" rather than "this is what
-             you're looking at" - a heavier border on top makes the active selection obvious.
+        <!-- The active mode is denoted solely by this border, not by disabling/graying out
+             the inactive button - both Original and Reformatted stay normally clickable.
              This targets a wrapper Border rather than the Button itself: confirmed via a
              standalone repro that Fluent's disabled-button styling forces the button's own
              internal ContentPresenter.BorderBrush to Transparent (thickness gets through,
-             brush doesn't), which silently ate a Button-targeted version of this style. -->
+             brush doesn't), which silently ate a Button-targeted version of this style - a
+             leftover risk even now that IsEnabled isn't toggled here, so the wrapper stays. -->
         <Style Selector="Border.active">
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
@@ -34,14 +34,12 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Border CornerRadius="4" Classes.active="{Binding IsShowingOriginal}">
                     <Button Command="{Binding ShowOriginalCommand}"
-                            Content="Original"
-                            IsEnabled="{Binding !IsShowingOriginal}"/>
+                            Content="Original"/>
                 </Border>
 
                 <Border CornerRadius="4" Classes.active="{Binding IsShowingFormatted}">
                     <Button Command="{Binding ShowFormattedCommand}"
-                            Content="Reformatted"
-                            IsEnabled="{Binding !IsShowingFormatted}"/>
+                            Content="Reformatted"/>
                 </Border>
             </StackPanel>
         </Border>
