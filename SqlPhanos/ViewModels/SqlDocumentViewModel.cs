@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -5,6 +6,7 @@ using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
 using SqlPhanos.Enums;
 using SqlPhanos.Messages;
+using SqlPhanos.ScriptDatabases;
 using SqlPhanos.Services;
 using System;
 using System.Collections.Generic;
@@ -43,6 +45,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
     private CancellationTokenSource? _cts;
+    private TaskCompletionSource<bool>? _encryptedConsentTcs;
 
     public string CurrentSqlText
     {
@@ -138,6 +141,15 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [ObservableProperty]
     private string _statusMessage = "";
 
+    [ObservableProperty]
+    private bool _pendingEncryptedConsent;
+
+    [ObservableProperty]
+    private string _pendingEncryptedObjectName = "";
+
+    [ObservableProperty]
+    private int _pendingEncryptedCount;
+
     // Parameterless constructor exists only for the XAML Design.DataContext tag.
     public SqlDocumentViewModel()
     {
@@ -167,7 +179,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         _cts = new CancellationTokenSource();
         try
         {
-            var script = await _searchService!.ScriptObjectAsync(_connectionString, _sourceResult!, _cts.Token);
+            var script = await ScriptWithConsentAsync(_cts.Token);
             OriginalSqlText = script;
             FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(script, FormattingSettingsService.OpeningParenOnNewLine);
             CurrentSqlText = OriginalSqlText;
@@ -202,6 +214,65 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    /// <summary>
+    /// Wraps SqlSearchService.ScriptObjectAsync in a catch-and-retry loop for encrypted
+    /// objects, mirroring ScriptDatabasesDocumentViewModel.ScriptOneDatabaseWithConsentAsync:
+    /// the underlying engine throws EncryptedModulesConsentRequiredException the first time
+    /// (before opening a DAC connection to decrypt), and this asks the user via the same
+    /// in-tab overlay pattern before retrying with consent granted.
+    /// </summary>
+    private async Task<string> ScriptWithConsentAsync(CancellationToken cancellationToken)
+    {
+        var allowEncryptedModuleDecrypt = false;
+        while (true)
+        {
+            try
+            {
+                return await _searchService!.ScriptObjectAsync(
+                    _connectionString,
+                    _sourceResult!,
+                    allowEncryptedModuleDecrypt,
+                    cancellationToken);
+            }
+            catch (EncryptedModulesConsentRequiredException consent)
+            {
+                var accepted = await RequestEncryptedConsentAsync(consent.DatabaseName, consent.EncryptedCount);
+                if (!accepted)
+                {
+                    throw new OperationCanceledException("Encrypted module decrypt declined.", cancellationToken);
+                }
+
+                allowEncryptedModuleDecrypt = true;
+            }
+        }
+    }
+
+    private Task<bool> RequestEncryptedConsentAsync(string objectName, int encryptedCount)
+    {
+        _encryptedConsentTcs = new TaskCompletionSource<bool>();
+        Dispatcher.UIThread.Post(() =>
+        {
+            PendingEncryptedObjectName = objectName;
+            PendingEncryptedCount = encryptedCount;
+            PendingEncryptedConsent = true;
+        });
+        return _encryptedConsentTcs.Task;
+    }
+
+    [RelayCommand]
+    private void ConfirmDecrypt()
+    {
+        PendingEncryptedConsent = false;
+        _encryptedConsentTcs?.TrySetResult(true);
+    }
+
+    [RelayCommand]
+    private void DeclineDecrypt()
+    {
+        PendingEncryptedConsent = false;
+        _encryptedConsentTcs?.TrySetResult(false);
     }
 
     [RelayCommand(CanExecute = nameof(IsScripting))]
