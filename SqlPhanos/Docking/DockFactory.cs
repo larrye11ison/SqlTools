@@ -32,6 +32,11 @@ namespace SqlPhanos.Docking
                 Id = "SearchDock",
                 Title = "Search",
                 Proportion = 0.35,
+                // The proportional split with Search Results below it must not be able to
+                // shrink this below the point where its own fields/Search button get clipped
+                // with no way to scroll to them. IDockable.MinHeight is a plain declarative
+                // floor on the proportional layout, same idea as a WPF row's MinHeight.
+                MinHeight = 320,
                 ActiveDockable = searchViewModelDockable,
                 VisibleDockables = CreateList<IDockable>(searchViewModelDockable)
             };

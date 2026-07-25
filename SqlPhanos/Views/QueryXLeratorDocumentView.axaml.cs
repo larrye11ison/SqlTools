@@ -9,6 +9,7 @@ using AvaloniaEdit.Document;
 using SqlPhanos.Services;
 using SqlPhanos.ViewModels;
 using System;
+using System.ComponentModel;
 using TextMateSharp.Grammars;
 using TextMateHost = AvaloniaEdit.TextMate.TextMate;
 
@@ -20,6 +21,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 	private TextEditor? _editor;
 	private TextMateHost.Installation? _textMateInstallation;
 	private QueryXLeratorDocumentViewModel? _trackedViewModel;
+	private bool _syncingFromViewModel;
 
 	public QueryXLeratorDocumentView()
 	{
@@ -39,6 +41,11 @@ public partial class QueryXLeratorDocumentView : UserControl
 	{
 		AvaloniaXamlLoader.Load(this);
 		_editor = this.FindControl<TextEditor>("Editor");
+	}
+
+	public void FocusEditor()
+	{
+		_editor?.Focus();
 	}
 
 	private async void OnBrowseClick(object? sender, RoutedEventArgs e)
@@ -111,6 +118,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 		if (_trackedViewModel is not null)
 		{
 			_editor.TextChanged -= OnEditorTextChanged;
+			_trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 			_trackedViewModel = null;
 		}
 
@@ -119,6 +127,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 			_trackedViewModel = viewModel;
 			_editor.Document = new TextDocument(viewModel.QueryText ?? string.Empty);
 			_editor.TextChanged += OnEditorTextChanged;
+			_trackedViewModel.PropertyChanged += OnViewModelPropertyChanged;
 		}
 		else
 		{
@@ -128,9 +137,47 @@ public partial class QueryXLeratorDocumentView : UserControl
 
 	private void OnEditorTextChanged(object? sender, EventArgs e)
 	{
-		if (_trackedViewModel is not null && _editor is not null)
+		if (_syncingFromViewModel || _trackedViewModel is null || _editor is null)
 		{
-			_trackedViewModel.QueryText = _editor.Document.Text;
+			return;
+		}
+
+		_trackedViewModel.QueryText = _editor.Document.Text;
+	}
+
+	// Needed for programmatic QueryText changes (e.g. ReformatCommand rewriting the text in
+	// place) to actually show up in the editor - OnEditorTextChanged above only covers the
+	// opposite direction (user typing). _syncingFromViewModel guards against the obvious
+	// ping-pong: setting Document.Text here would otherwise re-fire TextChanged and write the
+	// same value straight back into the ViewModel.
+	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+	{
+		if (_editor is null || sender is not QueryXLeratorDocumentViewModel viewModel)
+		{
+			return;
+		}
+
+		if (e.PropertyName != nameof(QueryXLeratorDocumentViewModel.QueryText))
+		{
+			return;
+		}
+
+		var newText = viewModel.QueryText ?? string.Empty;
+		if (_editor.Document.Text == newText)
+		{
+			return;
+		}
+
+		_syncingFromViewModel = true;
+		try
+		{
+			var caretOffset = Math.Min(_editor.CaretOffset, newText.Length);
+			_editor.Document.Text = newText;
+			_editor.CaretOffset = caretOffset;
+		}
+		finally
+		{
+			_syncingFromViewModel = false;
 		}
 	}
 
@@ -153,6 +200,7 @@ public partial class QueryXLeratorDocumentView : UserControl
 		if (_trackedViewModel is not null && _editor is not null)
 		{
 			_editor.TextChanged -= OnEditorTextChanged;
+			_trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 			_trackedViewModel = null;
 		}
 

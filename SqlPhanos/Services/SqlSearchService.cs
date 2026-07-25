@@ -213,6 +213,8 @@ public class SqlSearchService
                 sb.AppendLine($"-- Type: {result.TypeDesc}");
                 sb.AppendLine($"-- Server: {result.ServerName}");
                 sb.AppendLine($"-- Database: {result.DbName}");
+                sb.AppendLine($"USE [{result.DbName.Replace("]", "]]")}];");
+                sb.AppendLine();
                 sb.AppendLine("GO");
 
                 cancellationToken.ThrowIfCancellationRequested();

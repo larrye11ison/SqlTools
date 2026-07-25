@@ -70,8 +70,7 @@
 
 			<!-- Search Params -->
 			<StackPanel Margin="10">
-				<TextBlock Text="Search Parameters" FontWeight="Bold" Margin="0,0,0,5" />
-				<TextBlock Text="Object Name:" Margin="0,5,0,0" />
+				<TextBlock Text="Object Name:" Margin="0,0,0,0" />
 				<TextBox x:Name="ObjectNameBox" Text="{Binding ObjectNameQuery}" PlaceholderText="e.g. Customers" />
 
 				<TextBlock Text="Schema:" Margin="0,5,0,0" />

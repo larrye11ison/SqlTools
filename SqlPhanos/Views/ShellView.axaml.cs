@@ -86,14 +86,25 @@ public partial class ShellView : Window
 
     private void OpenFindInActiveDocument()
     {
-        GetActiveDocumentView()?.OpenFind();
+        if (GetActiveDocumentView() is SqlDocumentView sqlView)
+        {
+            sqlView.OpenFind();
+        }
     }
 
+    // Ctrl+M does "toggle formatting" on a script tab and "reformat in place" on a query tab -
+    // different actions on different document types, but the same key, matching how the user
+    // thinks about both as "fix up how this SQL looks."
     private void ToggleActiveDocumentFormatting()
     {
-        if (GetActiveDocumentView()?.DataContext is SqlDocumentViewModel activeDocumentViewModel)
+        switch (GetActiveDocumentView()?.DataContext)
         {
-            activeDocumentViewModel.ToggleDisplayModeCommand.Execute(null);
+            case SqlDocumentViewModel sqlDocumentViewModel:
+                sqlDocumentViewModel.ToggleDisplayModeCommand.Execute(null);
+                break;
+            case QueryXLeratorDocumentViewModel queryViewModel:
+                queryViewModel.ReformatCommand.Execute(null);
+                break;
         }
     }
 
@@ -125,11 +136,13 @@ public partial class ShellView : Window
 
     private void OnCyclePaneClick(object? sender, RoutedEventArgs e) => FocusNextPane();
 
-    private SqlDocumentView? GetActiveDocumentView()
+    // Returns whichever MDI document view (SqlDocumentView or QueryXLeratorDocumentView) is
+    // currently active, or null if none is / no document is open.
+    private Control? GetActiveDocumentView()
     {
         return this.GetVisualDescendants()
-            .OfType<SqlDocumentView>()
-            .FirstOrDefault(v => v.IsEffectivelyVisible);
+            .OfType<Control>()
+            .FirstOrDefault(v => v is (SqlDocumentView or QueryXLeratorDocumentView) && v.IsEffectivelyVisible);
     }
 
     private void OnAnyGotFocus(object? sender, FocusChangedEventArgs e)
@@ -148,7 +161,8 @@ public partial class ShellView : Window
         {
             paneId = "Search";
         }
-        else if (visual.FindAncestorOfType<SqlDocumentView>(includeSelf: true) is not null)
+        else if (visual.FindAncestorOfType<SqlDocumentView>(includeSelf: true) is not null ||
+                 visual.FindAncestorOfType<QueryXLeratorDocumentView>(includeSelf: true) is not null)
         {
             paneId = "Documents";
         }
@@ -206,6 +220,14 @@ public partial class ShellView : Window
 
     private void FocusDocumentsPaneDefault()
     {
-        GetActiveDocumentView()?.FocusEditor();
+        switch (GetActiveDocumentView())
+        {
+            case SqlDocumentView sqlView:
+                sqlView.FocusEditor();
+                break;
+            case QueryXLeratorDocumentView queryView:
+                queryView.FocusEditor();
+                break;
+        }
     }
 }
