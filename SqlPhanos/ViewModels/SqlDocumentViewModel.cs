@@ -1,11 +1,16 @@
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.CodeFormatting;
+using SqlPhanos.Enums;
 using SqlPhanos.Messages;
 using SqlPhanos.Services;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SqlPhanos.ViewModels;
 
@@ -16,11 +21,18 @@ public enum SqlDisplayMode
 }
 
 /// <summary>
-/// View model for a single SQL script document
+/// View model for a single SQL script document. Owns its own scripting lifecycle: it opens
+/// immediately in a busy state and scripts itself (rather than the Search pane scripting the
+/// object first and only opening the tab once done), so the tab is the sole place showing
+/// progress/cancel/error state for this object - the Search Results pane no longer tracks any
+/// of that.
 /// </summary>
 public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 {
     private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
+    private readonly SqlSearchService? _searchService;
+    private readonly string _connectionString = "";
+    private readonly SearchResultViewModel? _sourceResult;
     private string _currentSqlText = "";
     private SqlDisplayMode _displayMode = SqlDisplayMode.Original;
     private string _serverName = "";
@@ -30,6 +42,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private string _formattedSqlText = "";
     private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
+    private CancellationTokenSource? _cts;
 
     public string CurrentSqlText
     {
@@ -67,6 +80,11 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     public string TabHeaderLine1 => $"{ServerName} | {DbName}";
 
     public string TabHeaderLine2 => $"{SchemaName}.{ObjectName}";
+
+    public DocumentTabIconState TabIconState =>
+        IsScripting ? DocumentTabIconState.Busy :
+        IsInErrorState ? DocumentTabIconState.Error :
+        DocumentTabIconState.None;
 
     public string FormattedSqlText
     {
@@ -108,22 +126,88 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
     public string SyntaxScopeName => "source.sql";
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TabIconState))]
+    [NotifyCanExecuteChangedFor(nameof(CancelScriptingCommand))]
+    private bool _isScripting;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TabIconState))]
+    private bool _isInErrorState;
+
+    [ObservableProperty]
+    private string _statusMessage = "";
+
+    // Parameterless constructor exists only for the XAML Design.DataContext tag.
     public SqlDocumentViewModel()
     {
         Title = "SQL Script";
     }
 
-    public SqlDocumentViewModel(string serverName, string dbName, string schemaName, string objectName, string content)
+    /// <summary>
+    /// Opens immediately in a busy state (TabIconState shows Busy right away) and scripts the
+    /// object itself - see LoadAsync.
+    /// </summary>
+    public SqlDocumentViewModel(SearchResultViewModel result, string connectionString, SqlSearchService searchService)
     {
-        ServerName = serverName;
-        DbName = dbName;
-        SchemaName = schemaName;
-        ObjectName = objectName;
-        OriginalSqlText = content;
-        FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(content, FormattingSettingsService.OpeningParenOnNewLine);
-        CurrentSqlText = OriginalSqlText;
-        DisplayMode = SqlDisplayMode.Original;
-        Title = $"{schemaName}.{objectName}";
+        ServerName = result.ServerName;
+        DbName = result.DbName;
+        SchemaName = result.SchemaName;
+        ObjectName = result.ObjectName;
+        Title = $"{result.SchemaName}.{result.ObjectName}";
+        _sourceResult = result;
+        _connectionString = connectionString;
+        _searchService = searchService;
+        IsScripting = true;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var script = await _searchService!.ScriptObjectAsync(_connectionString, _sourceResult!, _cts.Token);
+            OriginalSqlText = script;
+            FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(script, FormattingSettingsService.OpeningParenOnNewLine);
+            CurrentSqlText = OriginalSqlText;
+            DisplayMode = SqlDisplayMode.Original;
+
+            try
+            {
+                var dependents = await _searchService.GetDependentObjectsAsync(_connectionString, _sourceResult!);
+                SetDependentObjects(dependents);
+            }
+            catch (Exception ex)
+            {
+                // Dependent-object discovery is best-effort - a failure here must not
+                // invalidate the script that already loaded successfully.
+                System.Diagnostics.Debug.WriteLine($"Dependent object lookup failed: {ex}");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Matches QueryXLeratorDocumentViewModel's convention: a user-initiated cancel is
+            // not an error state, just an empty/incomplete document.
+            StatusMessage = "Scripting cancelled.";
+        }
+        catch (Exception ex)
+        {
+            IsInErrorState = true;
+            StatusMessage = $"Scripting failed: {ex.Message}";
+        }
+        finally
+        {
+            IsScripting = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(IsScripting))]
+    private void CancelScripting()
+    {
+        _cts?.Cancel();
     }
 
     [RelayCommand]
@@ -167,11 +251,12 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [RelayCommand]
     private void ScriptDependentObject(SearchResultViewModel? dependent)
     {
-        if (dependent is null)
+        if (dependent is null || _searchService is null)
         {
             return;
         }
 
-        WeakReferenceMessenger.Default.Send(new ScriptObjectRequestMessage(dependent));
+        var doc = new SqlDocumentViewModel(dependent, _connectionString, _searchService);
+        WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
     }
 }

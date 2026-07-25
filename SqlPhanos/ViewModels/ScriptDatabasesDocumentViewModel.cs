@@ -1,0 +1,458 @@
+using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Dock.Model.Mvvm.Controls;
+using SqlPhanos.CodeFormatting;
+using SqlPhanos.Enums;
+using SqlPhanos.ScriptDatabases;
+using SqlPhanos.Services;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace SqlPhanos.ViewModels;
+
+/// <summary>
+/// A single "script every selected database on this connection to disk" session, ported from
+/// ScriptyGuy's MainViewModel/DBConnectionInfo orchestration (state model reused, mechanism
+/// rewritten to be CommunityToolkit.Mvvm-based and tab-owned like every other document in this
+/// app). Deliberately does not persist database selections across sessions - every time this
+/// document opens, its database list is freshly loaded with everything checked.
+/// </summary>
+public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderLines
+{
+	private readonly DatabaseCatalogueService _catalogueService = new();
+	private readonly DatabaseScriptingService _scriptingService = new();
+	private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
+	private readonly string _connectionString;
+	private string _actualServerName = "";
+
+	private CancellationTokenSource? _cts;
+	private TaskCompletionSource<bool>? _encryptedConsentTcs;
+	private TaskCompletionSource<ScriptOutputConflictChoice>? _outputConflictTcs;
+
+	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(TabIconState))]
+	[NotifyCanExecuteChangedFor(nameof(ScriptCommand))]
+	[NotifyCanExecuteChangedFor(nameof(CancelCommand))]
+	private bool _isRunning;
+
+	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(TabIconState))]
+	private bool _isInErrorState;
+
+	[ObservableProperty]
+	private string _status = "Connecting...";
+
+	[ObservableProperty]
+	private string _durationText = "";
+
+	[ObservableProperty]
+	private double _overallProgressPercent;
+
+	[ObservableProperty]
+	private string _baseOutputDirectory = "";
+
+	[ObservableProperty]
+	private bool _reformatSqlCode;
+
+	[ObservableProperty]
+	private bool _pendingEncryptedConsent;
+
+	[ObservableProperty]
+	private string _pendingEncryptedDatabaseName = "";
+
+	[ObservableProperty]
+	private int _pendingEncryptedCount;
+
+	[ObservableProperty]
+	private bool _pendingOutputConflict;
+
+	[ObservableProperty]
+	private string _pendingOutputConflictFolders = "";
+
+	public string ConnectionDisplayName { get; }
+
+	public ObservableCollection<DatabaseListItem> Databases { get; } = new();
+
+	public bool CanRunScript => !IsRunning;
+
+	// IHasTabHeaderLines - see SqlDocumentViewModel's identical implementation for why.
+	public string TabHeaderLine1 => ConnectionDisplayName;
+
+	public string TabHeaderLine2 => "Script Databases";
+
+	public DocumentTabIconState TabIconState =>
+		IsRunning ? DocumentTabIconState.Busy :
+		IsInErrorState ? DocumentTabIconState.Error :
+		DocumentTabIconState.None;
+
+	// Parameterless constructor exists only for the XAML Design.DataContext tag, matching the
+	// same pattern SqlDocumentViewModel/QueryXLeratorDocumentViewModel already use.
+	public ScriptDatabasesDocumentViewModel()
+	{
+		_connectionString = "";
+		ConnectionDisplayName = "";
+		Title = "Script Databases";
+	}
+
+	public ScriptDatabasesDocumentViewModel(string connectionString, string connectionDisplayName)
+	{
+		_connectionString = connectionString;
+		ConnectionDisplayName = connectionDisplayName;
+		Title = $"Script Databases - {connectionDisplayName}";
+		_ = LoadDatabasesAsync();
+	}
+
+	private async Task LoadDatabasesAsync()
+	{
+		IsRunning = true;
+		IsInErrorState = false;
+		Status = "Connecting...";
+
+		var cts = new CancellationTokenSource();
+		_cts = cts;
+		try
+		{
+			var catalogue = await _catalogueService.LoadCatalogueAsync(_connectionString, cts.Token);
+			_actualServerName = string.IsNullOrWhiteSpace(catalogue.ActualServerName)
+				? ConnectionDisplayName
+				: catalogue.ActualServerName;
+			Databases.Clear();
+			foreach (var name in catalogue.UserDatabases)
+			{
+				Databases.Add(new DatabaseListItem(name, isSelected: true));
+			}
+
+			Status = Databases.Count == 0
+				? "No user databases found."
+				: $"{Databases.Count} database(s) found.";
+		}
+		catch (OperationCanceledException)
+		{
+			Status = "Cancelled.";
+		}
+		catch (Exception ex)
+		{
+			IsInErrorState = true;
+			Status = $"Unable to connect: {ex.Message}";
+		}
+		finally
+		{
+			_cts = null;
+			IsRunning = false;
+		}
+	}
+
+	[RelayCommand]
+	private void CheckAll()
+	{
+		foreach (var item in Databases)
+		{
+			item.IsSelected = true;
+		}
+	}
+
+	[RelayCommand]
+	private void UncheckAll()
+	{
+		foreach (var item in Databases)
+		{
+			item.IsSelected = false;
+		}
+	}
+
+	[RelayCommand(CanExecute = nameof(CanRunScript))]
+	private async Task ScriptAsync()
+	{
+		if (string.IsNullOrWhiteSpace(BaseOutputDirectory))
+		{
+			Status = "Choose an output directory first.";
+			return;
+		}
+
+		var targets = Databases.Where(item => item.IsSelected).ToList();
+		if (targets.Count == 0)
+		{
+			Status = "Select at least one database.";
+			return;
+		}
+
+		IsRunning = true;
+		IsInErrorState = false;
+		Status = "Starting...";
+		DurationText = "";
+		OverallProgressPercent = 0;
+
+		var started = DateTime.Now;
+		var cts = new CancellationTokenSource();
+		_cts = cts;
+
+		using var elapsedTimer = new System.Timers.Timer(1000);
+		elapsedTimer.Elapsed += (_, _) =>
+		{
+			var elapsed = DateTime.Now.Subtract(started).ToString(@"hh\:mm\:ss");
+			Dispatcher.UIThread.Post(() => DurationText = elapsed);
+		};
+		elapsedTimer.Start();
+
+		try
+		{
+			var mode = await ResolveScriptingModeAsync(targets, cts.Token);
+			if (mode is null)
+			{
+				Status = "Cancelled.";
+				return;
+			}
+
+			var completed = 0;
+			foreach (var item in targets)
+			{
+				cts.Token.ThrowIfCancellationRequested();
+				item.BeginScripting();
+
+				try
+				{
+					var result = await ScriptOneDatabaseWithConsentAsync(item, mode.Value, completed, targets.Count, cts.Token);
+					item.FinalOutputDirectory = result.OutputDirectory;
+					item.CompleteScripting();
+				}
+				catch (OperationCanceledException)
+				{
+					item.CancelScripting();
+					throw;
+				}
+				catch (Exception ex)
+				{
+					item.FailScripting($"Failed: {ex.Message}");
+					throw;
+				}
+
+				completed++;
+				Status = $"{completed} / {targets.Count} databases completed.";
+			}
+
+			Status = "Complete.";
+			OverallProgressPercent = 100;
+		}
+		catch (OperationCanceledException)
+		{
+			Status = "Cancelled.";
+			MarkRemainingCancelled(targets);
+		}
+		catch (Exception ex)
+		{
+			IsInErrorState = true;
+			Status = $"FAIL: {ex.Message}";
+			MarkRemainingCancelled(targets);
+		}
+		finally
+		{
+			elapsedTimer.Stop();
+			_cts = null;
+			IsRunning = false;
+		}
+	}
+
+	[RelayCommand(CanExecute = nameof(IsRunning))]
+	private void Cancel()
+	{
+		_cts?.Cancel();
+	}
+
+	[RelayCommand]
+	private void ChooseDelta()
+	{
+		PendingOutputConflict = false;
+		_outputConflictTcs?.TrySetResult(ScriptOutputConflictChoice.Delta);
+	}
+
+	[RelayCommand]
+	private void ChooseReset()
+	{
+		PendingOutputConflict = false;
+		_outputConflictTcs?.TrySetResult(ScriptOutputConflictChoice.Reset);
+	}
+
+	[RelayCommand]
+	private void ChooseCancelConflict()
+	{
+		PendingOutputConflict = false;
+		_outputConflictTcs?.TrySetResult(ScriptOutputConflictChoice.Cancel);
+	}
+
+	/// <summary>
+	/// Checks each target database's output folder for existing content and, if any is found,
+	/// asks the user (in-tab overlay, Delta is the default/Enter choice) whether to only
+	/// re-script changed objects, wipe and do a full re-script, or cancel. Returns null on
+	/// Cancel.
+	/// </summary>
+	private async Task<ScriptingMode?> ResolveScriptingModeAsync(
+		List<DatabaseListItem> targets,
+		CancellationToken cancellationToken)
+	{
+		var nonEmptyFolders = CollectNonEmptyOutputFolders(targets);
+		if (nonEmptyFolders.Count == 0)
+		{
+			return ScriptingMode.Full;
+		}
+
+		var choice = await RequestScriptOutputConflictChoiceAsync(nonEmptyFolders);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		if (choice == ScriptOutputConflictChoice.Cancel)
+		{
+			return null;
+		}
+
+		if (choice == ScriptOutputConflictChoice.Reset)
+		{
+			foreach (var folder in nonEmptyFolders)
+			{
+				OutputFolderInspector.ClearContents(folder);
+			}
+
+			return ScriptingMode.Full;
+		}
+
+		return ScriptingMode.Delta;
+	}
+
+	private List<string> CollectNonEmptyOutputFolders(IEnumerable<DatabaseListItem> targets)
+	{
+		List<string> nonEmpty = [];
+		foreach (var item in targets)
+		{
+			var outputDirectory = DatabaseOutputPathResolver.ResolveDatabaseOutputDirectory(
+				BaseOutputDirectory,
+				_actualServerName,
+				item.Name);
+			if (OutputFolderInspector.HasContents(outputDirectory))
+			{
+				nonEmpty.Add(outputDirectory);
+			}
+		}
+
+		return nonEmpty;
+	}
+
+	private Task<ScriptOutputConflictChoice> RequestScriptOutputConflictChoiceAsync(List<string> nonEmptyFolders)
+	{
+		var tcs = new TaskCompletionSource<ScriptOutputConflictChoice>();
+		_outputConflictTcs = tcs;
+		PendingOutputConflictFolders = string.Join(Environment.NewLine, nonEmptyFolders);
+		PendingOutputConflict = true;
+		return tcs.Task;
+	}
+
+	[RelayCommand]
+	private void ConfirmDecrypt()
+	{
+		PendingEncryptedConsent = false;
+		_encryptedConsentTcs?.TrySetResult(true);
+	}
+
+	[RelayCommand]
+	private void DeclineDecrypt()
+	{
+		PendingEncryptedConsent = false;
+		_encryptedConsentTcs?.TrySetResult(false);
+	}
+
+	// Passed to the engine only when ReformatSqlCode is checked - it stays agnostic of any
+	// specific formatter otherwise. Reads FormattingSettingsService live (not captured once)
+	// so it matches whatever the user currently has set for paren placement, same as every
+	// other reformatting call site in this app.
+	private string FormatSqlText(string sql) =>
+		_sqlCanonicalizationService.FormatForDisplay(sql, FormattingSettingsService.OpeningParenOnNewLine);
+
+	private async Task<ScriptDatabaseResult> ScriptOneDatabaseWithConsentAsync(
+		DatabaseListItem item,
+		ScriptingMode mode,
+		int completedDatabases,
+		int totalDatabases,
+		CancellationToken cancellationToken)
+	{
+		var allowEncryptedModuleDecrypt = false;
+		while (true)
+		{
+			var progress = new Progress<ScriptingProgressReport>(report =>
+				ApplyDatabaseProgress(item, report, completedDatabases, totalDatabases));
+
+			var request = new ScriptDatabaseRequest(
+				_connectionString,
+				item.Name,
+				BaseOutputDirectory,
+				ScriptingDefaults.MaxConcurrentObjectScripts,
+				mode,
+				progress,
+				outputDirectory => Dispatcher.UIThread.Post(() => item.FinalOutputDirectory = outputDirectory),
+				cancellationToken,
+				allowEncryptedModuleDecrypt,
+				ReformatSqlCode ? FormatSqlText : null);
+
+			try
+			{
+				return await _scriptingService.ScriptDatabaseAsync(request);
+			}
+			catch (EncryptedModulesConsentRequiredException consent)
+			{
+				var accepted = await RequestEncryptedConsentAsync(consent.DatabaseName, consent.EncryptedCount);
+				if (!accepted)
+				{
+					throw new OperationCanceledException("Encrypted module decrypt declined.", cancellationToken);
+				}
+
+				allowEncryptedModuleDecrypt = true;
+			}
+		}
+	}
+
+	private Task<bool> RequestEncryptedConsentAsync(string databaseName, int encryptedCount)
+	{
+		_encryptedConsentTcs = new TaskCompletionSource<bool>();
+		Dispatcher.UIThread.Post(() =>
+		{
+			PendingEncryptedDatabaseName = databaseName;
+			PendingEncryptedCount = encryptedCount;
+			PendingEncryptedConsent = true;
+		});
+		return _encryptedConsentTcs.Task;
+	}
+
+	private void ApplyDatabaseProgress(
+		DatabaseListItem item,
+		ScriptingProgressReport report,
+		int completedDatabases,
+		int totalDatabases)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			if (!item.IsBusy)
+			{
+				return;
+			}
+
+			var databaseFraction = report.TotalObjects == 0
+				? 1
+				: (double)report.CompletedObjects / report.TotalObjects;
+			OverallProgressPercent = 100.0 * (completedDatabases + databaseFraction) / totalDatabases;
+			Status = $"{report.CompletedObjects} / {report.TotalObjects} objects, {report.ParallelTasks} parallel " +
+				$"({completedDatabases + 1}/{totalDatabases} DBs)";
+			item.ReportProgress(
+				report.TotalObjects == 0 ? 100 : 100.0 * report.CompletedObjects / report.TotalObjects,
+				$"{report.CompletedObjects} / {report.TotalObjects} completed, {report.ParallelTasks} parallel.");
+		});
+	}
+
+	private static void MarkRemainingCancelled(IEnumerable<DatabaseListItem> targets)
+	{
+		foreach (var item in targets.Where(db => db.IsBusy))
+		{
+			item.CancelScripting();
+		}
+	}
+}

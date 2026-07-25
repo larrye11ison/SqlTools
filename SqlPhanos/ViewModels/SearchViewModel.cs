@@ -7,7 +7,6 @@ using SqlPhanos.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace SqlPhanos.ViewModels
@@ -51,6 +50,7 @@ namespace SqlPhanos.ViewModels
 		[NotifyCanExecuteChangedFor(nameof(EditConnectionCommand))]
 		[NotifyCanExecuteChangedFor(nameof(SearchCommand))]
 		[NotifyCanExecuteChangedFor(nameof(OpenQueryXLeratorCommand))]
+		[NotifyCanExecuteChangedFor(nameof(OpenScriptDatabasesCommand))]
 		private SqlConnectionViewModel? _selectedConnection;
 
 		[ObservableProperty]
@@ -75,7 +75,16 @@ namespace SqlPhanos.ViewModels
 
 		public void Receive(ScriptObjectRequestMessage message)
 		{
-			_ = ScriptObjectInternalAsync(message.Value);
+			if (SelectedConnection == null)
+			{
+				PublishStatus("Select a connection before scripting an object.");
+				return;
+			}
+
+			var result = message.Value;
+			var doc = new SqlDocumentViewModel(result, SelectedConnection.ConnectionString, _searchService);
+			WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+			PublishStatus($"Scripting {result.SchemaName}.{result.ObjectName}...");
 		}
 
 		[RelayCommand]
@@ -151,6 +160,16 @@ namespace SqlPhanos.ViewModels
 			PublishStatus($"Opened new query session against '{SelectedConnection.ServerAndInstance}'.");
 		}
 
+		[RelayCommand(CanExecute = nameof(CanOpenQuery))]
+		private void OpenScriptDatabases()
+		{
+			if (SelectedConnection == null) return;
+
+			var doc = new ScriptDatabasesDocumentViewModel(SelectedConnection.ConnectionString, SelectedConnection.ServerAndInstance);
+			WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+			PublishStatus($"Opened database scripting session against '{SelectedConnection.ServerAndInstance}'.");
+		}
+
 		[RelayCommand]
 		private void SaveConnection()
 		{
@@ -192,66 +211,6 @@ namespace SqlPhanos.ViewModels
 		private void SaveConnections()
 		{
 			_connectionProfileStoreService.SaveConnections(Connections);
-		}
-
-		private async Task ScriptObjectInternalAsync(SearchResultViewModel result)
-		{
-			if (SelectedConnection == null)
-			{
-				PublishStatus("Select a connection before scripting an object.");
-				return;
-			}
-
-			if (result.IsScripting)
-			{
-				return;
-			}
-
-			result.IsScripting = true;
-			result.ScriptingCts = new CancellationTokenSource();
-
-			try
-			{
-				var script = await _searchService.ScriptObjectAsync(SelectedConnection.ConnectionString, result, result.ScriptingCts.Token);
-				System.Diagnostics.Debug.WriteLine($"ScriptObjectInternalAsync produced script for {result.SchemaName}.{result.ObjectName} with length {script.Length}");
-
-				var doc = new SqlDocumentViewModel(
-					result.ServerName,
-					result.DbName,
-					result.SchemaName,
-					result.ObjectName,
-					script);
-
-				WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
-				PublishStatus($"Scripted {result.SchemaName}.{result.ObjectName}.");
-
-				try
-				{
-					var dependents = await _searchService.GetDependentObjectsAsync(SelectedConnection.ConnectionString, result);
-					doc.SetDependentObjects(dependents);
-				}
-				catch (Exception ex)
-				{
-					// Dependent-object discovery is best-effort - a failure here must not
-					// invalidate the script that already opened successfully.
-					System.Diagnostics.Debug.WriteLine($"Dependent object lookup failed: {ex}");
-				}
-			}
-			catch (OperationCanceledException)
-			{
-				PublishStatus($"Scripting cancelled for {result.SchemaName}.{result.ObjectName}.");
-			}
-			catch (Exception ex)
-			{
-				System.Diagnostics.Debug.WriteLine($"Scripting error: {ex}");
-				PublishStatus($"Scripting failed: {ex.Message}");
-			}
-			finally
-			{
-				result.IsScripting = false;
-				result.ScriptingCts?.Dispose();
-				result.ScriptingCts = null;
-			}
 		}
 
 		[RelayCommand]

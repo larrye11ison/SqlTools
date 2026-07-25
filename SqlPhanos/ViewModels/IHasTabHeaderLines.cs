@@ -1,3 +1,5 @@
+using SqlPhanos.Enums;
+
 namespace SqlPhanos.ViewModels;
 
 /// <summary>
@@ -13,4 +15,10 @@ public interface IHasTabHeaderLines
 
 	/// <summary>Bottom line of the tab header - typically schema.objectname.</summary>
 	string TabHeaderLine2 { get; }
+
+	/// <summary>
+	/// The status icon this tab should currently show - the document itself is in control of
+	/// this (e.g. Busy while an async process it owns is running, Error if that process failed).
+	/// </summary>
+	DocumentTabIconState TabIconState { get; }
 }

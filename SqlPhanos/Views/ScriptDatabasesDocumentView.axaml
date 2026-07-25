@@ -1,0 +1,148 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             xmlns:sdb="using:SqlPhanos.ScriptDatabases"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="600"
+             x:Class="SqlPhanos.Views.ScriptDatabasesDocumentView"
+             x:DataType="vm:ScriptDatabasesDocumentViewModel">
+
+    <Design.DataContext>
+        <vm:ScriptDatabasesDocumentViewModel/>
+    </Design.DataContext>
+
+    <Grid>
+        <DockPanel Margin="12">
+            <DockPanel.IsEnabled>
+                <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                    <Binding Path="!PendingEncryptedConsent"/>
+                    <Binding Path="!PendingOutputConflict"/>
+                </MultiBinding>
+            </DockPanel.IsEnabled>
+            <!-- Output directory -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                <TextBlock DockPanel.Dock="Left"
+                           Text="Output folder:"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"/>
+                <Button DockPanel.Dock="Right" Content="Browse..." Click="OnBrowseClick" Margin="8,0,0,0"/>
+                <TextBox x:Name="OutputDirectoryBox" Text="{Binding BaseOutputDirectory}"/>
+            </DockPanel>
+
+            <CheckBox DockPanel.Dock="Top"
+                      Content="Reformat All SQL Code"
+                      IsChecked="{Binding ReformatSqlCode}"
+                      ToolTip.Tip="Run every scripted object through SqlPhanos's SQL formatter before writing it to disk"
+                      Margin="0,0,0,8"/>
+
+            <!-- Commands -->
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                <Button Content="Check All" Command="{Binding CheckAllCommand}"/>
+                <Button Content="Uncheck All" Command="{Binding UncheckAllCommand}"/>
+                <Button Content="Script" Command="{Binding ScriptCommand}" Classes="accent"/>
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}"/>
+            </StackPanel>
+
+            <!-- Overall status -->
+            <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" IsVisible="{Binding !IsInErrorState}"/>
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="IndianRed" IsVisible="{Binding IsInErrorState}"/>
+                <TextBlock Text="{Binding DurationText}" FontSize="11" Opacity="0.7" IsVisible="{Binding IsRunning}"/>
+                <ProgressBar Minimum="0" Maximum="100" Height="10"
+                             Value="{Binding OverallProgressPercent}"
+                             IsVisible="{Binding IsRunning}"/>
+            </StackPanel>
+
+            <!-- Database list -->
+            <ListBox ItemsSource="{Binding Databases}" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="sdb:DatabaseListItem">
+                        <Grid ColumnDefinitions="Auto,2*,3*" Margin="0,2">
+                            <CheckBox Grid.Column="0"
+                                      IsChecked="{Binding IsSelected}"
+                                      IsEnabled="{Binding CanChangeSelection}"
+                                      VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Name}"
+                                       VerticalAlignment="Center"
+                                       Margin="4,0"/>
+                            <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                                <ProgressBar Minimum="0" Maximum="100" Height="10"
+                                             Value="{Binding ProgressPercent}"
+                                             IsVisible="{Binding ShowProgressBar}"/>
+                                <TextBlock Text="{Binding ProgressStatus}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           IsVisible="{Binding HasProgressStatus}"/>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+        <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a
+             DAC connection, requires sysadmin), shown in-tab rather than as a modal dialog. -->
+        <Grid IsVisible="{Binding PendingEncryptedConsent}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Encrypted modules detected" FontWeight="Bold" FontSize="16"/>
+                    <TextBlock TextWrapping="Wrap">
+                        <Run Text="{Binding PendingEncryptedDatabaseName}"/>
+                        <Run Text=" has "/>
+                        <Run Text="{Binding PendingEncryptedCount}"/>
+                        <Run Text=" encrypted module(s) (WITH ENCRYPTION). Decrypting requires opening a Dedicated Administrator Connection (DAC / ADMIN:) and requires sysadmin (or equivalent) - for remote instances, 'remote admin connections' must be enabled. Nothing is altered or dropped on the server."/>
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                        <Button Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent"/>
+                        <Button Command="{Binding DeclineDecryptCommand}" Content="Skip"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Output-folder-already-has-content overlay. Delta is the default choice - it's both
+             the visually primary (accent) button and IsDefault="True", so hitting Enter while
+             this is showing proceeds with Delta, per explicit requirement. -->
+        <Grid IsVisible="{Binding PendingOutputConflict}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="480">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Output folder already has content" FontWeight="Bold" FontSize="16"/>
+                    <TextBlock TextWrapping="Wrap"
+                               Text="One or more of the selected databases' output folders already contain files:"/>
+                    <Border Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                            Padding="8"
+                            MaxHeight="120">
+                        <ScrollViewer>
+                            <TextBlock Text="{Binding PendingOutputConflictFolders}" TextWrapping="Wrap" FontFamily="Consolas,monospace" FontSize="11"/>
+                        </ScrollViewer>
+                    </Border>
+                    <TextBlock TextWrapping="Wrap">
+                        <Run Text="Delta only re-scripts objects that changed since they were last scripted (based on SQL Server's create/modify metadata). Reset first clears those folders, then does a full script of everything. Cancel does nothing."/>
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                        <Button Command="{Binding ChooseDeltaCommand}" Content="Delta" Classes="accent" IsDefault="True"/>
+                        <Button Command="{Binding ChooseResetCommand}" Content="Reset first"/>
+                        <Button Command="{Binding ChooseCancelConflictCommand}" Content="Cancel" IsCancel="True"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
