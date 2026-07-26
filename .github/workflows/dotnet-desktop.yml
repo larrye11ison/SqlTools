@@ -31,6 +31,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # actions/checkout defaults to a shallow, tags-less clone, so MinVer (see
+          # SqlPhanos.csproj) can't see any tag reachable from HEAD and falls back to its
+          # hardcoded 0.0.0-alpha.0 default instead of computing the real version.
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
