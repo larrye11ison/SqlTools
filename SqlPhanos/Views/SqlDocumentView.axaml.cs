@@ -152,7 +152,25 @@ public partial class SqlDocumentView : UserControl
             return;
         }
 
-        _editor.Document = new TextDocument(viewModel.CurrentSqlText ?? string.Empty);
+        var newText = viewModel.CurrentSqlText ?? string.Empty;
+
+        // Replacing Document wholesale (rather than mutating its text) is what was resetting
+        // scroll/caret on every Original/Formatted toggle - TextEditor.Document's setter means
+        // "this is a different file now" and resets view state accordingly. Each SqlDocumentView
+        // is 1:1 with one tab for its whole lifetime, so there's only ever one logical document
+        // here; reusing the same TextDocument instance and updating its text is correct, not
+        // just a workaround. ScrollOffset is captured/restored explicitly around the swap as a
+        // guarantee, rather than relying on TextView happening to leave it alone on its own.
+        if (_editor.Document is null)
+        {
+            _editor.Document = new TextDocument(newText);
+            return;
+        }
+
+        var scrollOffset = _editor.TextArea.TextView.ScrollOffset;
+        _editor.Document.Text = newText;
+        _editor.ScrollToHorizontalOffset(scrollOffset.X);
+        _editor.ScrollToVerticalOffset(scrollOffset.Y);
     }
 
     private void ApplyGrammar(string? scopeName)
