@@ -3,10 +3,13 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Dock.Model.Mvvm.Controls;
 using SqlPhanos.Messages;
+using SqlPhanos.ScriptDatabases;
 using SqlPhanos.Services;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace SqlPhanos.ViewModels
@@ -236,30 +239,41 @@ namespace SqlPhanos.ViewModels
 
 				var connectionString = SelectedConnection.ConnectionString;
 				var databases = await _searchService.GetDatabasesAsync(connectionString);
-				var allResults = new List<SearchResultViewModel>();
-				var failedDatabases = new List<string>();
+				var allResults = new ConcurrentBag<SearchResultViewModel>();
+				var failedDatabases = new ConcurrentBag<string>();
 
-				foreach (var db in databases)
-				{
-					try
+				// Searching one database at a time here was a regression from the old SqlTools
+				// app, which ran every selected database's search concurrently - reuses the same
+				// concurrency cap Script Databases already uses (ScriptingDefaults) rather than
+				// firing one task per database unbounded, since a connection can have far more
+				// databases than are safe to query all at once.
+				await Parallel.ForEachAsync(
+					databases,
+					new ParallelOptions { MaxDegreeOfParallelism = ScriptingDefaults.MaxConcurrentObjectScripts },
+					async (db, cancellationToken) =>
 					{
-						var results = await _searchService.SearchDatabaseAsync(
-							connectionString,
-							db,
-							ObjectNameQuery,
-							SchemaQuery,
-							DefinitionQuery);
+						try
+						{
+							var results = await _searchService.SearchDatabaseAsync(
+								connectionString,
+								db,
+								ObjectNameQuery,
+								SchemaQuery,
+								DefinitionQuery);
 
-						allResults.AddRange(results);
-					}
-					catch (Exception ex)
-					{
-						failedDatabases.Add(db);
-						System.Diagnostics.Debug.WriteLine($"Search error in database '{db}': {ex}");
-					}
-				}
+							foreach (var result in results)
+							{
+								allResults.Add(result);
+							}
+						}
+						catch (Exception ex)
+						{
+							failedDatabases.Add(db);
+							System.Diagnostics.Debug.WriteLine($"Search error in database '{db}': {ex}");
+						}
+					});
 
-				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(allResults));
+				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(allResults.ToList()));
 
 				if (failedDatabases.Count > 0)
 				{
