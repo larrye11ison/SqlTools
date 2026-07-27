@@ -26,54 +26,87 @@
             </Grid>
         </StackPanel>
 
-        <!-- Results list: a narrow, vertically-oriented item per result rather than a wide
-             columnar grid, since this panel now shares the left dock with Object Search. -->
+        <!-- Results list: each result is a small grid "card" that spans the full width of this
+             pane (ListBoxItem content stretches horizontally by default in this theme, same as
+             ScriptDatabasesDocumentView's database list), rather than one long "db.schema.object"
+             line - long names were making that hard to read. -->
         <ListBox x:Name="ResultsList"
                  Grid.Row="1"
                  ItemsSource="{Binding FilteredResults}"
                  DoubleTapped="ResultsList_DoubleTapped">
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:SearchResultViewModel">
-                    <StackPanel Spacing="2" Margin="0,2">
-                        <TextBlock Text="{Binding ServerName}"
-                                   FontSize="11"
-                                   Opacity="0.7"
-                                   TextTrimming="CharacterEllipsis"/>
+                    <StackPanel Margin="0,2">
+                        <!-- Column 0 ("*") takes whatever width is left over; column 1 ("Auto")
+                             sizes to its own widest content (the Script button / schema name),
+                             which is what pins both flush to the card's right edge. -->
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding ServerName}"
+                                       FontSize="11"
+                                       Opacity="0.7"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
 
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Border Background="{DynamicResource SystemAccentColor}"
-                                    CornerRadius="3"
-                                    Padding="4,1">
-                                <TextBlock Text="{Binding TypeDesc}" FontSize="10" FontWeight="SemiBold"/>
-                            </Border>
-                            <TextBlock Text="Encrypted"
-                                       FontSize="10"
-                                       FontWeight="SemiBold"
-                                       Foreground="Orange"
-                                       IsVisible="{Binding IsEncrypted}"/>
-                        </StackPanel>
-
-                        <TextBlock Text="{Binding FullyQualifiedName}"
-                                   FontSize="13"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap"/>
-
-                        <TextBlock Text="{Binding ParentFqName, StringFormat='on {0}'}"
-                                   FontSize="11"
-                                   Opacity="0.7"
-                                   IsVisible="{Binding HasParent}"
-                                   TextWrapping="Wrap"/>
-
-                        <StackPanel Orientation="Horizontal"
-                                    Spacing="4"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,4,0,0">
-                            <Button Content="Script"
+                            <!-- RowSpan 2 so the button lines up with both the server-name and
+                                 type rows, per the requested layout. -->
+                            <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                                    Content="Script"
                                     Command="{Binding ((vm:SearchResultsViewModel)DataContext).ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     CommandParameter="{Binding}"
-                                    Padding="6,3"
-                                    FontSize="12"/>
-                        </StackPanel>
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Padding="10,3"
+                                    FontSize="12"
+                                    Margin="8,0,0,0"/>
+
+                            <StackPanel Grid.Row="1" Grid.Column="0"
+                                        Orientation="Horizontal"
+                                        Spacing="6"
+                                        VerticalAlignment="Center"
+                                        Margin="0,2,0,0">
+                                <Border Background="{DynamicResource SystemAccentColor}"
+                                        CornerRadius="3"
+                                        Padding="4,1">
+                                    <TextBlock Text="{Binding TypeDisplay}" FontSize="10" FontWeight="SemiBold"/>
+                                </Border>
+                                <Border Background="OrangeRed"
+                                        CornerRadius="3"
+                                        Padding="4,1"
+                                        IsVisible="{Binding IsEncrypted}">
+                                    <TextBlock Text="Encrypted" FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                                </Border>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0"
+                                       Text="{Binding DbName}"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,4,0,0"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="1"
+                                       Text="{Binding SchemaName}"
+                                       FontSize="12"
+                                       Opacity="0.8"
+                                       HorizontalAlignment="Right"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="8,4,0,0"/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                                       Text="{Binding ObjectName}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
+                                       Margin="0,2,0,0"/>
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                                       Text="{Binding ParentFqName, StringFormat='on {0}'}"
+                                       FontSize="11"
+                                       Opacity="0.7"
+                                       IsVisible="{Binding HasParent}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,2,0,0"/>
+                        </Grid>
 
                         <Separator Margin="0,4,0,0"/>
                     </StackPanel>
