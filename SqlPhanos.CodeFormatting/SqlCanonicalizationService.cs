@@ -1217,6 +1217,18 @@ public sealed class SqlCanonicalizationService
 								{
 									result.Length = inClauseStartIndex;
 									FormatInClauseMultiline(result, inClauseContent, indentLevel);
+									// FormatInClauseMultiline always ends by appending ")" with no
+									// trailing newline, but truncating result back to
+									// inClauseStartIndex doesn't touch this loop's own lineStart
+									// variable - if the last thing inside the IN clause was a
+									// comment (which always ends its own line), lineStart was left
+									// true from processing that comment, before any of this ran.
+									// Every token handler after this one trusts lineStart at face
+									// value, so that stale true - result no longer actually ending
+									// in a newline - made each of them indent on top of the same
+									// line instead of starting a new one, stacking up extra tabs
+									// between this ")" and whatever followed (e.g. an OR).
+									lineStart = false;
 									inInClause = false;
 									inClauseStartIndex = -1;
 									inClauseDepth = -1;
@@ -1595,7 +1607,25 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Then:
-						AppendSpaceIfNeeded(result, lineStart);
+						// THEN normally continues on the same line as its WHEN condition
+						// (AppendSpaceIfNeeded is a no-op once already mid-line), but a long or
+						// multi-line WHEN condition - or a comment right before THEN, which
+						// always ends with a newline - can leave lineStart true here. Unlike
+						// AppendSpaceIfNeeded, this branch actually needs to indent AND clear
+						// lineStart when that happens - otherwise THEN lands at column 0 with no
+						// indent, and the *next* token, still seeing lineStart true, wrongly
+						// indents itself instead. caseWhenIndent (set when this THEN's own WHEN
+						// was processed) aligns THEN under its WHEN, the same as ELSE/END already
+						// do elsewhere in this switch.
+						if (lineStart)
+						{
+							AppendIndentIfNeeded(result, caseWhenIndent, ref lineStart);
+						}
+						else
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+						}
+
 						result.Append(token.Text.ToUpperInvariant());
 						result.Append(' ');
 						previousWasStatementEnd = false;
@@ -2097,47 +2127,192 @@ public sealed class SqlCanonicalizationService
 			return;
 		}
 
+		// indentLevel is a flat counter that does not track how deep "IN (" actually landed once
+		// CASE/WHEN, AND-continuation, and nested-parenthesis indents (each their own, separate
+		// mechanism) have all been applied to it - using it directly produced the right answer
+		// only by coincidence for a shallow, top-level IN clause, and left deeply-nested ones
+		// (e.g. inside a WHEN's boolean expression) badly under-indented. The line "IN (" is
+		// actually sitting on, read back out of result before anything more is appended to it,
+		// is the one thing that already reflects every one of those mechanisms correctly.
+		var currentLineIndentTabs = GetCurrentLineText(result).TakeWhile(c => c == '\t').Count();
+
 		var prefix = inClauseContent[..(startParen + 1)].Trim();
 		result.Append(prefix);
 		result.AppendLine();
 
 		var valuesPart = inClauseContent[(startParen + 1)..].Trim().TrimEnd(')');
-		var values = valuesPart
-			.Split([','], StringSplitOptions.RemoveEmptyEntries)
-			.Select(value => value.Trim())
-			.ToList();
+		var segments = SplitInClauseSegments(valuesPart);
+		var lastValueIndex = segments.FindLastIndex(segment => !segment.IsComment);
 
-		var indent = new string('\t', indentLevel + 1);
+		// One tab deeper than the "IN (" line itself - the same "+1 per nesting level"
+		// convention this formatter already uses for ordinary parenthesis expansion.
+		var indent = new string('\t', currentLineIndentTabs + 1);
 		var currentLine = new StringBuilder();
 
-		foreach (var value in values)
+		void FlushLine()
 		{
-			var separatorLength = currentLine.Length > 0 ? 2 : 0;
-			if (currentLine.Length > 0 && indent.Length + currentLine.Length + separatorLength + value.Length > 120)
+			if (currentLine.Length == 0)
 			{
+				return;
+			}
+
+			result.Append(indent);
+			result.Append(currentLine);
+			result.AppendLine();
+			currentLine.Clear();
+		}
+
+		for (var index = 0; index < segments.Count; index++)
+		{
+			var (text, isComment) = segments[index];
+
+			if (isComment)
+			{
+				// A comment always gets its own line - it must never be merged with the value
+				// before or after it, which is what silently swallowed values into commented-out
+				// text before this rewrite.
+				FlushLine();
 				result.Append(indent);
-				result.Append(currentLine);
+				result.Append(text);
 				result.AppendLine();
-				currentLine.Clear();
+				continue;
+			}
+
+			// Every value except the very last one needs a trailing comma baked in before the
+			// line-length check, not appended separately - appending it only to values that
+			// stay on the same line (the previous approach) is what dropped the comma whenever
+			// a value happened to be the last one to fit on a line.
+			var isLastValue = index == lastValueIndex;
+			var token = isLastValue ? text : text + ",";
+			var separatorLength = currentLine.Length > 0 ? 1 : 0;
+
+			if (currentLine.Length > 0 && indent.Length + currentLine.Length + separatorLength + token.Length > 120)
+			{
+				FlushLine();
 			}
 
 			if (currentLine.Length > 0)
 			{
-				currentLine.Append(", ");
+				currentLine.Append(' ');
 			}
 
-			currentLine.Append(value);
+			currentLine.Append(token);
 		}
 
-		if (currentLine.Length > 0)
-		{
-			result.Append(indent);
-			result.Append(currentLine);
-			result.AppendLine();
-		}
+		FlushLine();
 
-		result.Append(new string('\t', Math.Max(0, indentLevel)));
+		// Matches the "IN (" line's own indent, same basis as the values above (indentLevel is
+		// the same disconnected counter that under-indented the values before that fix).
+		result.Append(new string('\t', currentLineIndentTabs));
 		result.Append(')');
+	}
+
+	/// <summary>
+	/// Splits an IN-list's inner text into value/comment segments on top-level commas only -
+	/// never inside a nested parenthesis (e.g. a function call), a string literal, or a
+	/// -- line / block comment, all of which the previous plain Split(',') would break on.
+	/// </summary>
+	private static List<(string Text, bool IsComment)> SplitInClauseSegments(string valuesPart)
+	{
+		var segments = new List<(string Text, bool IsComment)>();
+		var current = new StringBuilder();
+		var parenDepth = 0;
+		var i = 0;
+
+		void FlushValue()
+		{
+			var text = current.ToString().Trim();
+			if (text.Length > 0)
+			{
+				segments.Add((text, false));
+			}
+
+			current.Clear();
+		}
+
+		while (i < valuesPart.Length)
+		{
+			var c = valuesPart[i];
+
+			if (c == '-' && i + 1 < valuesPart.Length && valuesPart[i + 1] == '-')
+			{
+				FlushValue();
+				var end = valuesPart.IndexOf('\n', i);
+				if (end < 0)
+				{
+					end = valuesPart.Length;
+				}
+
+				segments.Add((valuesPart[i..end].TrimEnd(), true));
+				i = end;
+				continue;
+			}
+
+			if (c == '/' && i + 1 < valuesPart.Length && valuesPart[i + 1] == '*')
+			{
+				FlushValue();
+				var end = valuesPart.IndexOf("*/", i + 2, StringComparison.Ordinal);
+				end = end < 0 ? valuesPart.Length : end + 2;
+				segments.Add((valuesPart[i..end], true));
+				i = end;
+				continue;
+			}
+
+			if (c == '\'')
+			{
+				current.Append(c);
+				i++;
+				while (i < valuesPart.Length)
+				{
+					current.Append(valuesPart[i]);
+					if (valuesPart[i] == '\'')
+					{
+						if (i + 1 < valuesPart.Length && valuesPart[i + 1] == '\'')
+						{
+							current.Append(valuesPart[i + 1]);
+							i += 2;
+							continue;
+						}
+
+						i++;
+						break;
+					}
+
+					i++;
+				}
+
+				continue;
+			}
+
+			if (c == '(')
+			{
+				parenDepth++;
+				current.Append(c);
+				i++;
+				continue;
+			}
+
+			if (c == ')')
+			{
+				parenDepth = Math.Max(0, parenDepth - 1);
+				current.Append(c);
+				i++;
+				continue;
+			}
+
+			if (c == ',' && parenDepth == 0)
+			{
+				FlushValue();
+				i++;
+				continue;
+			}
+
+			current.Append(c);
+			i++;
+		}
+
+		FlushValue();
+		return segments;
 	}
 
 	private static int GetActiveExpandedParenthesisDepth(Stack<ParenthesisScope> parenthesisStack)
@@ -2224,9 +2399,37 @@ public sealed class SqlCanonicalizationService
 	private static int GetExpressionLengthUntilClauseBoundary(IList<TSqlParserToken> tokens, int startIndex)
 	{
 		var length = 0;
+		var depth = 0;
 		for (var i = startIndex; i < tokens.Count; i++)
 		{
 			var token = tokens[i];
+
+			if (token.TokenType == TSqlTokenType.LeftParenthesis)
+			{
+				depth++;
+			}
+			else if (token.TokenType == TSqlTokenType.RightParenthesis)
+			{
+				// A closing paren that doesn't match one opened within this span belongs to
+				// whatever enclosing group the measured expression sits inside (e.g. a CASE
+				// WHEN's own wrapping parenthesis) - not to the expression itself.
+				if (depth == 0)
+				{
+					break;
+				}
+
+				depth--;
+			}
+			else if (depth == 0 && (IsClauseBoundaryToken(token.TokenType) || IsCaseBoundaryToken(token.TokenType) || token.TokenType == TSqlTokenType.Comma))
+			{
+				// THEN/WHEN/ELSE/END/CASE and commas can never legitimately be part of the
+				// expression being measured either - IsClauseBoundaryToken alone doesn't know
+				// about them, which is what let this run straight through a WHEN's own THEN
+				// (and everything after it) when measuring a BETWEEN clause's upper bound,
+				// inflating its "length" enough to wrongly trigger a line break before it.
+				break;
+			}
+
 			if (token.TokenType == TSqlTokenType.WhiteSpace)
 			{
 				if (length > 0)
@@ -2236,7 +2439,7 @@ public sealed class SqlCanonicalizationService
 				continue;
 			}
 
-			if (token.TokenType == TSqlTokenType.EndOfFile || IsClauseBoundaryToken(token.TokenType))
+			if (token.TokenType == TSqlTokenType.EndOfFile)
 			{
 				break;
 			}
@@ -2250,6 +2453,11 @@ public sealed class SqlCanonicalizationService
 		}
 
 		return length;
+	}
+
+	private static bool IsCaseBoundaryToken(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.Then or TSqlTokenType.When or TSqlTokenType.Else or TSqlTokenType.End or TSqlTokenType.Case;
 	}
 
 	private static int GetNextExpressionSegmentLength(string expression, int startIndex, int currentDepth)
