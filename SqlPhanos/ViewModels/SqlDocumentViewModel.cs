@@ -187,7 +187,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
             try
             {
-                var dependents = await _searchService.GetDependentObjectsAsync(_connectionString, _sourceResult!);
+                var dependents = await _searchService!.GetDependentObjectsAsync(_connectionString, _sourceResult!);
                 SetDependentObjects(dependents);
             }
             catch (Exception ex)
