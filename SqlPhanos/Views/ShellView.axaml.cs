@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using SqlPhanos.Services;
 using SqlPhanos.ViewModels;
@@ -14,8 +15,6 @@ namespace SqlPhanos.Views;
 
 public partial class ShellView : Window
 {
-    private static readonly string[] PaneOrder = { "Search", "Documents", "SearchResults" };
-
     public ShellView()
     {
         Debug.WriteLine("=== ShellView constructor ===");
@@ -29,14 +28,15 @@ public partial class ShellView : Window
         // handledEventsToo is required on both of these: descendants (the DataGrid,
         // AvaloniaEdit's TextEditor, etc.) routinely mark GotFocus/KeyDown as handled as part
         // of their own internal behavior, which would otherwise stop this from ever observing
-        // focus changes or the Ctrl+Shift+P shortcut when it originates inside those controls.
-        // Ctrl+Shift+P is handled directly here (rather than via a declarative Window.KeyBinding
-        // + the ApplicationShortcutMessage pipeline used for the other shortcuts) for that reason.
-        // Bubble alone is enough - the Window is the root of the visual tree, so the bubble
-        // phase always reaches back here, and handledEventsToo already bypasses any descendant
-        // marking the event Handled along the way. Registering Tunnel too made this handler
-        // fire twice per event (once tunneling down, once bubbling back up), which silently
-        // cancelled out the Ctrl+M formatting toggle (two toggles = no net change).
+        // focus changes or the pane-focus/results-toggle shortcuts when they originate inside
+        // those controls. Those shortcuts are handled directly here (rather than via a
+        // declarative Window.KeyBinding + the ApplicationShortcutMessage pipeline used for the
+        // other shortcuts) for that reason. Bubble alone is enough - the Window is the root of
+        // the visual tree, so the bubble phase always reaches back here, and handledEventsToo
+        // already bypasses any descendant marking the event Handled along the way. Registering
+        // Tunnel too made this handler fire twice per event (once tunneling down, once bubbling
+        // back up), which silently cancelled out the Ctrl+M formatting toggle (two toggles = no
+        // net change).
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble, handledEventsToo: true);
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Bubble, handledEventsToo: true);
     }
@@ -49,9 +49,23 @@ public partial class ShellView : Window
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.P && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        if (e.Key == Key.R && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
         {
-            FocusNextPane();
+            FocusSearchResultsPane();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.D && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        {
+            FocusDocumentsPane();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.R && e.KeyModifiers == KeyModifiers.Control)
+        {
+            ToggleResultsGrid();
             e.Handled = true;
             return;
         }
@@ -134,7 +148,26 @@ public partial class ShellView : Window
 
     private void OnCloseDocumentClick(object? sender, RoutedEventArgs e) => CloseActiveDocument();
 
-    private void OnCyclePaneClick(object? sender, RoutedEventArgs e) => FocusNextPane();
+    private void OnFocusSearchResultsClick(object? sender, RoutedEventArgs e) => FocusSearchResultsPane();
+
+    private void OnFocusDocumentsClick(object? sender, RoutedEventArgs e) => FocusDocumentsPane();
+
+    private void OnToggleResultsGridClick(object? sender, RoutedEventArgs e) => ToggleResultsGrid();
+
+    private void ToggleResultsGrid()
+    {
+        (DataContext as ShellViewModel)?.ToggleResultsGrid();
+
+        // Follow the pane that Ctrl+R just revealed, same as jumping there directly - showing
+        // a results view without moving focus into it would be a half-finished-feeling toggle.
+        // Deferred (unlike FocusSearchResultsPane's other callers): the toggle just changed
+        // which of SearchResultsView/SearchResultsGridView is present in the dock tree, and its
+        // control isn't necessarily materialized in the visual tree yet at this exact point -
+        // GetVisualDescendants() in FocusSearchResultsPaneDefault needs a layout pass to have
+        // run first, or it finds nothing and silently does nothing. Same reasoning as
+        // SearchResultsView's own Dispatcher deferral for "focus first result."
+        Dispatcher.UIThread.Post(FocusSearchResultsPane, DispatcherPriority.Input);
+    }
 
     // Returns whichever MDI document view (SqlDocumentView, QueryXLeratorDocumentView, or
     // ScriptDatabasesDocumentView) is currently active, or null if none is / no document is open.
@@ -153,7 +186,8 @@ public partial class ShellView : Window
         }
 
         string? paneId = null;
-        if (visual.FindAncestorOfType<SearchResultsView>(includeSelf: true) is not null)
+        if (visual.FindAncestorOfType<SearchResultsView>(includeSelf: true) is not null ||
+            visual.FindAncestorOfType<SearchResultsGridView>(includeSelf: true) is not null)
         {
             paneId = "SearchResults";
         }
@@ -174,49 +208,43 @@ public partial class ShellView : Window
         }
     }
 
-    private void FocusNextPane()
+    // Ctrl+Shift+R - jumps straight to whichever results view (card or grid) is currently
+    // pinned/visible, restoring keyboard focus to whatever control was last focused there
+    // (PaneFocusTracker), or that view's own "focus first result" default if nothing is tracked
+    // yet (e.g. the pane hasn't been focused since the app opened, or since it last flipped
+    // between card/grid). Unlike the old Ctrl+Shift+P cycling this replaces, this always jumps
+    // straight to this one pane rather than computing a "next" pane from wherever focus happens
+    // to be now.
+    private void FocusSearchResultsPane() => FocusPane("SearchResults", FocusSearchResultsPaneDefault);
+
+    // Ctrl+Shift+D - same idea as FocusSearchResultsPane, for the Documents/MDI area.
+    private void FocusDocumentsPane() => FocusPane("Documents", FocusDocumentsPaneDefault);
+
+    private static void FocusPane(string paneId, System.Action focusDefault)
     {
-        var currentIndex = System.Array.IndexOf(PaneOrder, PaneFocusTracker.CurrentPaneId);
-        var nextPaneId = PaneOrder[(currentIndex + 1 + PaneOrder.Length) % PaneOrder.Length];
-
-        // Always advance the cycle position, even if nothing ends up actually receiving focus
-        // below (e.g. the Documents pane's default target doesn't exist because no document is
-        // open). Otherwise GotFocus never fires for a no-op focus attempt, CurrentPaneId never
-        // moves off the pane the user started in, and every subsequent press recomputes the
-        // same "next" pane - effectively trapping the user in whichever pane they started from.
-        PaneFocusTracker.CurrentPaneId = nextPaneId;
-
-        if (PaneFocusTracker.TryGetLastFocus(nextPaneId, out var element) && element is not null)
+        if (PaneFocusTracker.TryGetLastFocus(paneId, out var element) && element is not null)
         {
             element.Focus();
             return;
         }
 
-        switch (nextPaneId)
-        {
-            case "Search":
-                FocusSearchPaneDefault();
-                break;
-            case "SearchResults":
-                FocusSearchResultsPaneDefault();
-                break;
-            case "Documents":
-                FocusDocumentsPaneDefault();
-                break;
-        }
-    }
-
-    private void FocusSearchPaneDefault()
-    {
-        var searchView = this.GetVisualDescendants().OfType<SearchView>().FirstOrDefault();
-        var objectNameBox = searchView?.FindControl<TextBox>("ObjectNameBox");
-        objectNameBox?.Focus();
+        focusDefault();
     }
 
     private void FocusSearchResultsPaneDefault()
     {
-        var searchResultsView = this.GetVisualDescendants().OfType<SearchResultsView>().FirstOrDefault();
-        searchResultsView?.FocusFirstResult();
+        // Exactly one of the two results views is ever pinned/visible at a time (see
+        // ShellViewModel.ApplyResultsViewMode) - find whichever one that currently is.
+        switch (this.GetVisualDescendants().OfType<Control>()
+            .FirstOrDefault(v => (v is SearchResultsView or SearchResultsGridView) && v.IsEffectivelyVisible))
+        {
+            case SearchResultsView cardView:
+                cardView.FocusFirstResult();
+                break;
+            case SearchResultsGridView gridView:
+                gridView.FocusFirstResult();
+                break;
+        }
     }
 
     private void FocusDocumentsPaneDefault()

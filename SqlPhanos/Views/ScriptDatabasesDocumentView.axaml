@@ -119,7 +119,7 @@
 
         <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a
              DAC connection, requires sysadmin), shown in-tab rather than as a modal dialog. -->
-        <Grid IsVisible="{Binding PendingEncryptedConsent}" Background="#80000000">
+        <Grid x:Name="EncryptedConsentOverlay" IsVisible="{Binding PendingEncryptedConsent}" Background="#80000000">
             <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                     BorderThickness="1"
@@ -137,7 +137,7 @@
                         <Run Text=" encrypted module(s) (WITH ENCRYPTION). Decrypting requires opening a Dedicated Administrator Connection (DAC / ADMIN:) and requires sysadmin (or equivalent) - for remote instances, 'remote admin connections' must be enabled. Nothing is altered or dropped on the server."/>
                     </TextBlock>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
-                        <Button Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent"/>
+                        <Button x:Name="ConfirmDecryptButton" Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent" IsDefault="True"/>
                         <Button Command="{Binding DeclineDecryptCommand}" Content="Skip"/>
                     </StackPanel>
                 </StackPanel>
@@ -147,7 +147,7 @@
         <!-- Output-folder-already-has-content overlay. Delta is the default choice - it's both
              the visually primary (accent) button and IsDefault="True", so hitting Enter while
              this is showing proceeds with Delta, per explicit requirement. -->
-        <Grid IsVisible="{Binding PendingOutputConflict}" Background="#80000000">
+        <Grid x:Name="OutputConflictOverlay" IsVisible="{Binding PendingOutputConflict}" Background="#80000000">
             <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                     BorderThickness="1"
@@ -171,7 +171,7 @@
                         <Run Text="Delta only re-scripts objects that changed since they were last scripted (based on SQL Server's create/modify metadata). Reset first clears those folders, then does a full script of everything. Cancel does nothing."/>
                     </TextBlock>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
-                        <Button Command="{Binding ChooseDeltaCommand}" Content="Delta" Classes="accent" IsDefault="True"/>
+                        <Button x:Name="ChooseDeltaButton" Command="{Binding ChooseDeltaCommand}" Content="Delta" Classes="accent" IsDefault="True"/>
                         <Button Command="{Binding ChooseResetCommand}" Content="Reset first"/>
                         <Button Command="{Binding ChooseCancelConflictCommand}" Content="Cancel" IsCancel="True"/>
                     </StackPanel>

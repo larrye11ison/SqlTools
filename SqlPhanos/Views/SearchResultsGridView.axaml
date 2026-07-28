@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="260"
+             x:Class="SqlPhanos.Views.SearchResultsGridView"
+             x:DataType="vm:SearchResultsGridViewModel">
+
+    <Design.DataContext>
+        <vm:SearchResultsGridViewModel/>
+    </Design.DataContext>
+
+    <DockPanel>
+        <!-- Same filter fields as the card view (SearchResultsView) - both bind straight
+             through to the one shared SearchResultsViewModel, so filtering behaves
+             identically no matter which of the two views is currently showing. -->
+        <StackPanel DockPanel.Dock="Top"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Margin="4"
+                    Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+            <TextBox Text="{Binding SearchResults.FilterGeneral}" PlaceholderText="Filter (any field)" Width="220" Margin="2"/>
+            <TextBox Text="{Binding SearchResults.FilterName}" PlaceholderText="Name" Width="140" Margin="2"/>
+            <TextBox Text="{Binding SearchResults.FilterSchema}" PlaceholderText="Schema" Width="120" Margin="2"/>
+            <TextBox Text="{Binding SearchResults.FilterDb}" PlaceholderText="DB" Width="120" Margin="2"/>
+            <TextBox Text="{Binding SearchResults.FilterType}" PlaceholderText="Type" Width="120" Margin="2"/>
+        </StackPanel>
+
+        <DataGrid x:Name="ResultsGrid"
+                  ItemsSource="{Binding SearchResults.FilteredResults}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  GridLinesVisibility="Horizontal"
+                  CanUserSortColumns="True"
+                  CanUserResizeColumns="True"
+                  DoubleTapped="ResultsGrid_DoubleTapped">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Server" Binding="{Binding ServerName}"/>
+                <DataGridTextColumn Header="Database" Binding="{Binding DbName}"/>
+                <DataGridTextColumn Header="Schema" Binding="{Binding SchemaName}"/>
+                <DataGridTextColumn Header="Object Name" Binding="{Binding ObjectName}" Width="*"/>
+                <DataGridTextColumn Header="Type" Binding="{Binding TypeDisplay}"/>
+                <DataGridCheckBoxColumn Header="Encrypted" Binding="{Binding IsEncrypted}" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Parent" Binding="{Binding ParentFqName}"/>
+                <DataGridTemplateColumn Header="">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate DataType="vm:SearchResultViewModel">
+                            <Button Content="Script"
+                                    Command="{Binding ((vm:SearchResultsGridViewModel)DataContext).SearchResults.ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Padding="8,3"
+                                    FontSize="12"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

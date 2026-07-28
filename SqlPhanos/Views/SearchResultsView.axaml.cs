@@ -31,6 +31,15 @@ public partial class SearchResultsView : UserControl, IRecipient<FocusFirstSearc
 
     public void Receive(FocusFirstSearchResultMessage message)
     {
+        // The grid view (SearchResultsGridView) is registered for the exact same message -
+        // only whichever of the two is currently pinned/visible should react (see
+        // ShellViewModel.ApplyResultsViewMode - the other one is unpinned/detached at any
+        // given time, never both).
+        if (!this.IsEffectivelyVisible)
+        {
+            return;
+        }
+
         // This runs synchronously inside the same call stack as the FilteredResults
         // reassignment that triggered it, before the ListBox's ItemsSource binding and
         // layout have necessarily caught up, so this is deferred to a dispatcher pass

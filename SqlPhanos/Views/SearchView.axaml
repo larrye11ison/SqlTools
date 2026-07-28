@@ -90,12 +90,19 @@
 				<TextBlock Text="Definition:" Margin="0,5,0,0" />
 				<TextBox Text="{Binding DefinitionQuery}" PlaceholderText="e.g. CREATE TABLE" />
 
-				<Button Command="{Binding SearchCommand}" Content="Search" HorizontalAlignment="Right" Margin="0,10,0,0" IsEnabled="{Binding CanSearch}" IsDefault="True" />
+				<Grid ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+					<CheckBox Grid.Column="0"
+                              Content="Results as grid"
+                              IsChecked="{Binding ResultsAsGrid}"
+                              ToolTip.Tip="Show search results as a full-width datagrid docked at the bottom instead of the card list on the left (Ctrl+R)"
+                              VerticalAlignment="Center" />
+					<Button Grid.Column="1" Command="{Binding SearchCommand}" Content="Search" IsEnabled="{Binding CanSearch}" IsDefault="True" />
+				</Grid>
 			</StackPanel>
 		</DockPanel>
 
 		<!-- Delete Confirmation Overlay -->
-		<Grid IsVisible="{Binding ShowDeleteConfirmation}" Background="#80000000">
+		<Grid x:Name="DeleteConfirmationOverlay" IsVisible="{Binding ShowDeleteConfirmation}" Background="#80000000">
 			<Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                     BorderThickness="1"
@@ -109,7 +116,7 @@
 					<TextBlock Text="Are you sure you want to delete this connection?" TextWrapping="Wrap" Margin="0,0,0,20" />
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
 						<Button Command="{Binding ConfirmDeleteCommand}" Content="Delete" Background="Red" Foreground="White" Margin="0,0,10,0" />
-						<Button Command="{Binding CancelDeleteCommand}" Content="Cancel" />
+						<Button x:Name="CancelDeleteButton" Command="{Binding CancelDeleteCommand}" Content="Cancel" IsDefault="True" />
 					</StackPanel>
 				</StackPanel>
 			</Border>
