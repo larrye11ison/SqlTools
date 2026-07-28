@@ -12,6 +12,18 @@ public partial class ScriptDatabasesDocumentView : UserControl
 	public ScriptDatabasesDocumentView()
 	{
 		InitializeComponent();
+
+		if (this.FindControl<Control>("EncryptedConsentOverlay") is { } encryptedOverlay &&
+			this.FindControl<Button>("ConfirmDecryptButton") is { } confirmButton)
+		{
+			OverlayFocusHelper.FocusOnShow(encryptedOverlay, confirmButton);
+		}
+
+		if (this.FindControl<Control>("OutputConflictOverlay") is { } outputConflictOverlay &&
+			this.FindControl<Button>("ChooseDeltaButton") is { } deltaButton)
+		{
+			OverlayFocusHelper.FocusOnShow(outputConflictOverlay, deltaButton);
+		}
 	}
 
 	private void InitializeComponent()

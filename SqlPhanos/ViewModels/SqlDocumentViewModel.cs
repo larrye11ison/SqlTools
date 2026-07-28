@@ -132,6 +132,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TabIconState))]
     [NotifyCanExecuteChangedFor(nameof(CancelScriptingCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RefreshCommand))]
     private bool _isScripting;
 
     [ObservableProperty]
@@ -280,6 +281,26 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         _cts?.Cancel();
     }
+
+    // Re-scripts the object from the server. Not a special "no-cache" path - it's just calling
+    // ScriptWithConsentAsync again, which is already enough: SqlSearchService.ScriptObjectAsync
+    // and EncryptedModuleDecryptor both open a brand new SMO Server/connection per call rather
+    // than reusing one across calls, and SMO's own object-model cache lives on the Server
+    // instance itself (no static/cross-instance cache), so a new Server means no stale metadata
+    // regardless of what changed on the actual database since the last load. Reuses LoadAsync
+    // unchanged - it already fully resets Original/Formatted/dependents and is itself
+    // cancelable via the same IsScripting/_cts/CancelScriptingCommand machinery the initial
+    // load uses, which is also why the header row (Original/Reformatted/Refresh) hides itself
+    // and the Scripting.../Cancel banner takes over while a refresh is running.
+    [RelayCommand(CanExecute = nameof(CanRefresh))]
+    private void Refresh()
+    {
+        IsInErrorState = false;
+        IsScripting = true;
+        _ = LoadAsync();
+    }
+
+    private bool CanRefresh => !IsScripting;
 
     [RelayCommand]
     private void ShowFormatted()

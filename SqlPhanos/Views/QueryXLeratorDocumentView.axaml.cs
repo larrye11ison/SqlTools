@@ -45,7 +45,12 @@ public partial class QueryXLeratorDocumentView : UserControl
 
 	public void FocusEditor()
 	{
-		_editor?.Focus();
+		// TextEditor itself is deliberately non-focusable by design (AvaloniaEdit sets
+		// FocusableProperty.OverrideDefaultValue<TextEditor>(false) - only TextArea, its
+		// child, actually is), so _editor.Focus() is a silent no-op. Mouse clicks work because
+		// TextArea's own pointer-press handling focuses it directly, bypassing TextEditor
+		// entirely - which is exactly why this only ever worked after clicking with the mouse.
+		_editor?.TextArea.Focus();
 	}
 
 	private async void OnBrowseClick(object? sender, RoutedEventArgs e)

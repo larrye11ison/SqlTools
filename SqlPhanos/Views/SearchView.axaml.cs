@@ -12,6 +12,12 @@ public partial class SearchView : UserControl
     {
         InitializeComponent();
 
+        if (this.FindControl<Control>("DeleteConfirmationOverlay") is { } deleteOverlay &&
+            this.FindControl<Button>("CancelDeleteButton") is { } cancelButton)
+        {
+            OverlayFocusHelper.FocusOnShow(deleteOverlay, cancelButton);
+        }
+
         WeakReferenceMessenger.Default.Register<ApplicationShortcutMessage>(this, (recipient, message) =>
         {
             if (message.Value != ApplicationShortcut.Find)

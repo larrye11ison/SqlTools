@@ -34,7 +34,11 @@ public static class ScriptingOptionsFactory
             DriIncludeSystemNames = true,
             Indexes = true,
             ClusteredIndexes = true,
-            IncludeDatabaseContext = true,
+            // False, not true: ObjectScriptHeaderBuilder already writes its own "USE [db]" / GO
+            // ahead of every scripted object's body, for both this factory's callers. Leaving
+            // this true made SMO's Scripter *also* emit its own "USE [db]" as the first line of
+            // the body it returns, producing two USE statements back to back in every script.
+            IncludeDatabaseContext = false,
             IncludeDatabaseRoleMemberships = true,
             Triggers = includeTriggersInTableScript,
             Permissions = true,

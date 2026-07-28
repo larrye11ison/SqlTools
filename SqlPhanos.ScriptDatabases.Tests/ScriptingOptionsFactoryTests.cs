@@ -14,7 +14,10 @@ public class ScriptingOptionsFactoryTests
         Assert.True(options.DriIncludeSystemNames);
         Assert.True(options.Indexes);
         Assert.True(options.ClusteredIndexes);
-        Assert.True(options.IncludeDatabaseContext);
+        // False, not true - ObjectScriptHeaderBuilder already writes its own USE/GO ahead of
+        // every scripted object; leaving this true made SMO emit a second one (see
+        // ScriptingOptionsFactory's comment on this setting).
+        Assert.False(options.IncludeDatabaseContext);
         Assert.True(options.IncludeDatabaseRoleMemberships);
         Assert.True(options.Permissions);
         Assert.True(options.ScriptBatchTerminator);

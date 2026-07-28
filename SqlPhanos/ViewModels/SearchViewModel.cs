@@ -59,6 +59,14 @@ namespace SqlPhanos.ViewModels
 		[ObservableProperty]
 		private bool _showDeleteConfirmation;
 
+		// The two results views (card and grid) are mutually exclusive - ShellViewModel listens
+		// for this changing (via ResultsViewModeChangedMessage below) and pins/unpins the two
+		// results dock panels accordingly. Ctrl+R (see ShellView) flips this same property
+		// directly rather than having a separate code path, so the checkbox always reflects
+		// reality regardless of which one triggered the change.
+		[ObservableProperty]
+		private bool _resultsAsGrid;
+
 		public bool CanDeleteSelectedConnection => SelectedConnection is not null;
 
 		public bool CanEditSelectedConnection => SelectedConnection is not null;
@@ -297,6 +305,11 @@ namespace SqlPhanos.ViewModels
 			{
 				IsSearching = false;
 			}
+		}
+
+		partial void OnResultsAsGridChanged(bool value)
+		{
+			WeakReferenceMessenger.Default.Send(new ResultsViewModeChangedMessage(value));
 		}
 
 		private static void PublishStatus(string status)
