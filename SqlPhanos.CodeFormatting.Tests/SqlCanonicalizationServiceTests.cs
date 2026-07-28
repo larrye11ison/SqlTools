@@ -1239,6 +1239,166 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void LongInClauseWrapsWithTrailingCommasAndCorrectIndent()
+	{
+		// A long IN-list (many constant values) wraps once a line would exceed the length
+		// threshold. Two bugs previously affected this: the comma that belongs between the
+		// last value on one wrapped line and the first value on the next was dropped entirely
+		// (values.Foreach only appended ", " *between* items already accumulated on the current
+		// line, never onto the line being flushed), and the values' indent was a flat offset
+		// from a counter (indentLevel) that doesn't track CASE/WHEN/nested-parenthesis context -
+		// it now derives from the "IN (" line's own actual indent instead (see
+		// LongInClauseInsideNestedCaseWhenIndentsRelativeToItsOwnLine for the deeply-nested
+		// case that flat offset got wrong).
+		//
+		// Built with explicit \t/\n escapes rather than this file's usual triple-quoted raw
+		// string, since this test specifically asserts on exact tab placement and a raw string
+		// literal makes stray-space-vs-tab mistakes invisible.
+		var sql = "SELECT * FROM History WHERE 1 = 1 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170);";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM History\n" +
+			"WHERE 1 = 1\n" +
+			"\tAND History.SubCode IN (\n" +
+			"\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
+			"\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
+			"\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
+			"\t\t207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170\n" +
+			"\t);";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void LongInClauseKeepsLineCommentsOnTheirOwnLine()
+	{
+		// A line comment (-- ...) embedded between values in a long IN-list must never be
+		// merged with an adjacent value - the previous plain Split(',') treated a comment plus
+		// everything up to the next comma as a single "value", silently swallowing the real
+		// value's own comma and gluing unrelated text together.
+		var sql = "SELECT * FROM History WHERE 1 = 1 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
+			"-- Added 172 mapping here 2020-08-05 JProfumo TASC127392 (per Matt..)\n" +
+			", 171\n" +
+			"-- Added 171 mapping here 2021-05-28 JProfumo TASC133635\n" +
+			", 170);";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM History\n" +
+			"WHERE 1 = 1\n" +
+			"\tAND History.SubCode IN (\n" +
+			"\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
+			"\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
+			"\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
+			"\t\t207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172,\n" +
+			"\t\t-- Added 172 mapping here 2020-08-05 JProfumo TASC127392 (per Matt..)\n" +
+			"\t\t171,\n" +
+			"\t\t-- Added 171 mapping here 2021-05-28 JProfumo TASC133635\n" +
+			"\t\t170\n" +
+			"\t);";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void LongInClauseInsideNestedCaseWhenIndentsRelativeToItsOwnLine()
+	{
+		// The regression this guards against: with a flat "indentLevel + N" offset, an IN clause
+		// buried inside a CASE/WHEN's boolean expression (AND/OR, nested parens) came out
+		// under-indented relative to its own "IN (" line, because indentLevel doesn't track that
+		// nesting the same way the text actually on the page does. The fix reads the indent
+		// directly off the "IN (" line itself, so values always land one tab deeper than
+		// wherever that line actually ended up - 3 tabs here, one more than "AND History.SubCode
+		// IN ("'s own 2.
+		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode IN (250, 251)) OR (History.TransactionCode = 330 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170)) THEN 1 END FROM History;";
+
+		var expected =
+			"SELECT FEES_AMT =\n" +
+			"CASE\n" +
+			"\tWHEN (History.TransactionCode IN (250, 251))\n" +
+			"\t\tOR (\n" +
+			"\t\tHistory.TransactionCode = 330\n" +
+			"\t\tAND History.SubCode IN (\n" +
+			"\t\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
+			"\t\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
+			"\t\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
+			"\t\t\t207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170\n" +
+			"\t\t)\n" +
+			"\t\t) THEN 1\n" +
+			"END\n" +
+			"FROM History;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void TokenAfterInClauseEndingInACommentStartsItsOwnLine()
+	{
+		// The regression this guards against: when the last thing before a long IN clause's
+		// closing paren is a comment, the main loop's lineStart was left true from processing
+		// that comment - true because a comment always ends its own line. But
+		// FormatInClauseMultiline rebuilds the whole clause from scratch and always ends by
+		// appending ")" with no trailing newline, and nothing resynced lineStart to match. Every
+		// token handler afterward trusted that stale true and indented on top of the same line
+		// instead of starting a new one, so the OR right after the wrapping parenthesis's own
+		// close ended up glued to the same line with a pile of stray tabs between them instead
+		// of on its own line.
+		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode = 1) OR (History.TransactionCode = 330 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
+			"-- trailing comment before close\n" +
+			")) OR (History.TransactionCode = 2) THEN 1 END FROM History;";
+
+		var expected =
+			"SELECT FEES_AMT =\n" +
+			"CASE\n" +
+			"\tWHEN (History.TransactionCode = 1)\n" +
+			"\t\tOR (\n" +
+			"\t\tHistory.TransactionCode = 330\n" +
+			"\t\tAND History.SubCode IN (\n" +
+			"\t\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
+			"\t\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
+			"\t\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
+			"\t\t\t207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
+			"\t\t\t-- trailing comment before close\n" +
+			"\t\t)\n" +
+			"\t\t)\n" +
+			"\t\tOR (History.TransactionCode = 2) THEN 1\n" +
+			"END\n" +
+			"FROM History;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void ThenIndentsCorrectlyWhenPrecededByACommentAfterAMultilineWhen()
+	{
+		// THEN normally continues on the same line as its WHEN condition. When the WHEN
+		// condition is long enough to wrap onto multiple lines and a comment sits right before
+		// THEN (a comment always ends with a newline), THEN previously landed at column 0 with
+		// no indent at all, and the token right after it wrongly absorbed the indent that should
+		// have belonged to THEN instead - because AppendSpaceIfNeeded, unlike
+		// AppendIndentIfNeeded, is a no-op at the start of a line and never clears lineStart.
+		var sql = "SELECT FEES_AMT = CASE WHEN History.TransactionCode = 330 AND (ISNULL(investortypename, '') <> '3rd Party' OR ParentInvestorID IN ('7074', 'F00043')) -- Prior Servicer, Forbearance, and Arrearage Late Charges for TPS only.  - mdeibler 8/16/2017\nTHEN CONVERT(VARCHAR(13), History.TransactionAmt) END FROM History;";
+
+		var expected =
+			"SELECT FEES_AMT =\n" +
+			"CASE\n" +
+			"\tWHEN History.TransactionCode = 330\n" +
+			"\t\tAND (\n" +
+			"\t\tISNULL(investortypename, '') <> '3rd Party'\n" +
+			"\t\tOR ParentInvestorID IN ('7074', 'F00043')\n" +
+			"\t\t)\n" +
+			"\t-- Prior Servicer, Forbearance, and Arrearage Late Charges for TPS only.  - mdeibler 8/16/2017\n" +
+			"\tTHEN CONVERT(VARCHAR(13), History.TransactionAmt)\n" +
+			"END\n" +
+			"FROM History;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void ChainedJoinsWithBetweenClauseFormatCorrectly()
 	{
 		// Regression test for the #LoanListDataTape join chain in FullSuiteMBADelinquency.sql:
@@ -1256,6 +1416,30 @@ public sealed class SqlCanonicalizationServiceTests
 			""";
 
 		RunFactTest(expected);
+	}
+
+	[Fact]
+	public void ShortBetweenInsideCaseWhenDoesNotWrapBeforeThen()
+	{
+		// The regression this guards against: deciding whether a BETWEEN's upper bound is "too
+		// long to keep on this line" measured forward from that value until IsClauseBoundaryToken
+		// (AND/OR/FROM/WHERE/JOIN/etc.) - which doesn't include THEN, WHEN, ELSE, END, CASE, or
+		// commas. Inside a CASE WHEN, that ran straight through ") THEN 1" and beyond, inflating
+		// the measured "length" of a two-character constant enough to wrongly trigger a line
+		// break immediately before it - "79" would end up alone on its own line, indented, for
+		// no reason a reader could see.
+		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode = 330 AND History.SubCode BETWEEN 66 AND 79) THEN 1 ELSE 2 END FROM History;";
+
+		var expected =
+			"SELECT FEES_AMT =\n" +
+			"CASE\n" +
+			"\tWHEN (History.TransactionCode = 330\n" +
+			"\t\tAND History.SubCode BETWEEN 66 AND 79) THEN 1\n" +
+			"\tELSE 2\n" +
+			"END\n" +
+			"FROM History;";
+
+		RunFactTest(sql, expected);
 	}
 
 	[Fact]
