@@ -17,6 +17,7 @@ public partial class App : Application
     {
         FontSettingsService.Initialize();
         FormattingSettingsService.Initialize();
+        UpdateCheckService.Initialize();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

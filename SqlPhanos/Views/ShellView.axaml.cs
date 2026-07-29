@@ -8,13 +8,20 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using SqlPhanos.Services;
 using SqlPhanos.ViewModels;
+using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace SqlPhanos.Views;
 
 public partial class ShellView : Window
 {
+    private DispatcherTimer? _updatePulseTimer;
+    private bool _updatePulseDim;
+
     public ShellView()
     {
         Debug.WriteLine("=== ShellView constructor ===");
@@ -39,6 +46,14 @@ public partial class ShellView : Window
         // net change).
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble, handledEventsToo: true);
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Bubble, handledEventsToo: true);
+
+        // ShellView is the one long-lived MainWindow for the app's whole lifetime, so this
+        // subscription is never unsubscribed - matches UpdateCheckService's own lifetime.
+        UpdateCheckService.UpdateAvailableChanged += OnUpdateAvailableChanged;
+        if (UpdateCheckService.AvailableUpdate is not null)
+        {
+            ShowUpdateAvailable();
+        }
     }
 
     private void InitializeComponent()
@@ -132,6 +147,95 @@ public partial class ShellView : Window
     {
         var aboutView = new AboutView();
         await aboutView.ShowDialog(this);
+    }
+
+    private void OnUpdateAvailableChanged(object? sender, EventArgs e)
+    {
+        // Fires from UpdateCheckService's background Timer, not the UI thread.
+        Dispatcher.UIThread.Post(ShowUpdateAvailable);
+    }
+
+    private void ShowUpdateAvailable()
+    {
+        if (this.FindControl<MenuItem>("UpdateAvailableMenuItem") is not { } menuItem)
+        {
+            return;
+        }
+
+        menuItem.IsVisible = true;
+
+        if (_updatePulseTimer is not null)
+        {
+            return;
+        }
+
+        // Toggling Opacity every 500ms against the 0.5s DoubleTransition set on this MenuItem in
+        // ShellView.axaml is what turns the toggle into a continuous ~1-second fade rather than a
+        // hard flicker.
+        _updatePulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _updatePulseTimer.Tick += (_, _) =>
+        {
+            _updatePulseDim = !_updatePulseDim;
+            menuItem.Opacity = _updatePulseDim ? 0.3 : 1.0;
+        };
+        _updatePulseTimer.Start();
+    }
+
+    private async void OnCheckForUpdateClick(object? sender, RoutedEventArgs e)
+    {
+        var update = UpdateCheckService.AvailableUpdate;
+        if (update is null)
+        {
+            return;
+        }
+
+        var dialog = new UpdateAvailableView();
+        var confirmed = await dialog.ShowDialog<bool>(this);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        string zipPath;
+        try
+        {
+            zipPath = await DownloadUpdateAsync(update.DownloadUrl);
+        }
+        catch (Exception ex)
+        {
+            // Download failed - leave the app running untouched, same as clicking Later. The
+            // updater is never launched unless the download actually succeeded.
+            Debug.WriteLine($"Update download failed: {ex}");
+            return;
+        }
+
+        var updaterPath = Path.Combine(AppContext.BaseDirectory, "SqlPhanos.Updater.exe");
+        var relaunchPath = Process.GetCurrentProcess().MainModule?.FileName
+            ?? Path.Combine(AppContext.BaseDirectory, "SqlPhanos.exe");
+
+        Process.Start(updaterPath, new[]
+        {
+            Environment.ProcessId.ToString(),
+            zipPath,
+            AppContext.BaseDirectory,
+            relaunchPath
+        });
+
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+    }
+
+    private static async Task<string> DownloadUpdateAsync(string url)
+    {
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SqlPhanos-UpdateCheck");
+
+        var bytes = await client.GetByteArrayAsync(url);
+        var zipPath = Path.Combine(Path.GetTempPath(), $"SqlPhanos-update-{Guid.NewGuid():N}.zip");
+        await File.WriteAllBytesAsync(zipPath, bytes);
+        return zipPath;
     }
 
     private void OnExitClick(object? sender, RoutedEventArgs e)

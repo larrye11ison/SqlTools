@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="380" d:DesignHeight="280"
+        x:Class="SqlPhanos.Views.UpdateAvailableView"
+        Title="Update Available"
+        Width="380"
+        Height="280"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,16,0,0"
+                    Spacing="8">
+            <Button Name="LaterButton" Content="Later" Click="OnLaterClick"/>
+            <Button Name="UpdateButton" Content="Update and Restart" Click="OnUpdateClick" Classes="accent" IsDefault="True"/>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+            <TextBlock Text="A new version of SqlPhanos is available" FontWeight="Bold" FontSize="15" TextWrapping="Wrap"/>
+            <TextBlock Name="StatusText" FontSize="12" Opacity="0.75" TextWrapping="Wrap"/>
+            <ScrollViewer MaxHeight="120">
+                <TextBlock Name="NotesText" FontSize="12" TextWrapping="Wrap"/>
+            </ScrollViewer>
+        </StackPanel>
+    </DockPanel>
+
+</Window>

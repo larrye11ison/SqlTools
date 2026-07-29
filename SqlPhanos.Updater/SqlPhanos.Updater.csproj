@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- WinExe rather than Exe - this launches detached from SqlPhanos with no console attached,
+         and a plain console OutputType briefly flashes an empty console window on start. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SqlPhanos.Updater</AssemblyName>
+  </PropertyGroup>
+</Project>
