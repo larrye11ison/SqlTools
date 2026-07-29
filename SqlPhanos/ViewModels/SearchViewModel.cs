@@ -67,6 +67,16 @@ namespace SqlPhanos.ViewModels
 		[ObservableProperty]
 		private bool _resultsAsGrid;
 
+		// Drives the one-line status row under the Search button: "Searching..." while a search
+		// is in flight, then "N results found."/"No results found." once results are bound.
+		// SearchStatusIsWarning flags the zero-results case so the view can give it a subtle
+		// highlight without the ViewModel knowing anything about colors.
+		[ObservableProperty]
+		private string _searchStatusText = "";
+
+		[ObservableProperty]
+		private bool _searchStatusIsWarning;
+
 		public bool CanDeleteSelectedConnection => SelectedConnection is not null;
 
 		public bool CanEditSelectedConnection => SelectedConnection is not null;
@@ -240,6 +250,8 @@ namespace SqlPhanos.ViewModels
 			}
 
 			IsSearching = true;
+			SearchStatusText = "⏳ Searching...";
+			SearchStatusIsWarning = false;
 			try
 			{
 				PublishStatus($"Searching server '{SelectedConnection.ServerAndInstance}'...");
@@ -283,6 +295,17 @@ namespace SqlPhanos.ViewModels
 
 				WeakReferenceMessenger.Default.Send(new SearchResultsMessage(allResults.ToList()));
 
+				if (allResults.Count == 0)
+				{
+					SearchStatusText = "No results found.";
+					SearchStatusIsWarning = true;
+				}
+				else
+				{
+					SearchStatusText = $"{allResults.Count} results found.";
+					SearchStatusIsWarning = false;
+				}
+
 				if (failedDatabases.Count > 0)
 				{
 					PublishStatus($"Found {allResults.Count} result(s). {failedDatabases.Count} database(s) failed.");
@@ -300,6 +323,8 @@ namespace SqlPhanos.ViewModels
 			{
 				System.Diagnostics.Debug.WriteLine($"Search error: {ex}");
 				PublishStatus($"Search failed: {ex.Message}");
+				SearchStatusText = "";
+				SearchStatusIsWarning = false;
 			}
 			finally
 			{

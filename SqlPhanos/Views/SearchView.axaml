@@ -7,6 +7,14 @@
              x:Class="SqlPhanos.Views.SearchView"
              x:DataType="vm:SearchViewModel">
 
+	<UserControl.Styles>
+		<!-- Subtle, not "nuclear" orange - a translucent tint over the theme background rather
+		     than a solid saturated color, so it stands out without dominating the panel. -->
+		<Style Selector="Border.searchStatusWarning">
+			<Setter Property="Background" Value="#33FF7A00" />
+		</Style>
+	</UserControl.Styles>
+
 	<Grid>
 		<!-- Main Content -->
 		<DockPanel IsEnabled="{Binding !ShowDeleteConfirmation}">
@@ -98,6 +106,13 @@
                               VerticalAlignment="Center" />
 					<Button Grid.Column="1" Command="{Binding SearchCommand}" Content="Search" IsEnabled="{Binding CanSearch}" IsDefault="True" />
 				</Grid>
+
+				<Border Margin="0,6,0,0"
+                        CornerRadius="3"
+                        Padding="4,2"
+                        Classes.searchStatusWarning="{Binding SearchStatusIsWarning}">
+					<TextBlock Text="{Binding SearchStatusText}" FontSize="12" />
+				</Border>
 			</StackPanel>
 		</DockPanel>
 
