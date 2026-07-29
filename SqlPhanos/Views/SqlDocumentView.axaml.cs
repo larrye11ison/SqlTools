@@ -2,6 +2,7 @@
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Search;
@@ -59,17 +60,22 @@ public partial class SqlDocumentView : UserControl
             return;
         }
 
-        // Reactivate (rather than Open again) when the panel is already open so that pressing
-        // Ctrl+F a second time refocuses the search box and re-selects its current text for
-        // immediate retyping, instead of being a no-op.
+        // Open() (AvaloniaEdit's own SearchPanel, used the first time or after Close()) never
+        // focuses its own search box - only Reactivate() does (confirmed against AvaloniaEdit's
+        // actual source). That's fine when Ctrl+F is pressed while this tab's editor already has
+        // focus, since focus already being nearby made it *look* like it worked before, but not
+        // when focus was elsewhere (a different pane, a different tab) - the panel became
+        // visible but nothing ever moved keyboard focus into it. Always reactivating after
+        // opening covers both cases with one code path. Deferred a tick: Open() only just added
+        // the panel as a child, and its search box needs its own template applied - the same
+        // "control not materialized yet" timing already solved elsewhere in this app - before
+        // Reactivate()'s Focus() call has anything real to land on.
         if (_searchPanel.IsClosed)
         {
             _searchPanel.Open();
         }
-        else
-        {
-            _searchPanel.Reactivate();
-        }
+
+        Dispatcher.UIThread.Post(() => _searchPanel.Reactivate(), DispatcherPriority.Input);
     }
 
     private void InitializeComponent()
