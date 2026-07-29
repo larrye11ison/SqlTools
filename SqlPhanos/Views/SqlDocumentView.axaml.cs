@@ -9,6 +9,7 @@ using AvaloniaEdit.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SqlPhanos.Services;
 using SqlPhanos.ViewModels;
+using System;
 using System.ComponentModel;
 using TextMateSharp.Grammars;
 using TextMateHost = AvaloniaEdit.TextMate.TextMate;
@@ -22,6 +23,8 @@ public partial class SqlDocumentView : UserControl
     private TextMateHost.Installation? _textMateInstallation;
     private SearchPanel? _searchPanel;
     private SqlDocumentViewModel? _trackedViewModel;
+    private int? _pendingCaretOffset;
+    private bool _pendingCaretWasFormatted;
 
     public SqlDocumentView()
     {
@@ -131,6 +134,7 @@ public partial class SqlDocumentView : UserControl
 
         if (_trackedViewModel is not null)
         {
+            _trackedViewModel.PropertyChanging -= OnViewModelPropertyChanging;
             _trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _trackedViewModel = null;
         }
@@ -138,6 +142,7 @@ public partial class SqlDocumentView : UserControl
         if (DataContext is SqlDocumentViewModel viewModel)
         {
             _trackedViewModel = viewModel;
+            _trackedViewModel.PropertyChanging += OnViewModelPropertyChanging;
             _trackedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             UpdateEditorDocument(viewModel);
             ApplyGrammar(viewModel.SyntaxScopeName);
@@ -147,6 +152,23 @@ public partial class SqlDocumentView : UserControl
             _editor.Document = new TextDocument();
             ApplyGrammar("source.sql");
         }
+    }
+
+    private void OnViewModelPropertyChanging(object? sender, PropertyChangingEventArgs e)
+    {
+        // CurrentSqlText only changes in one place: ShowOriginal()/ShowFormatted(), which the
+        // Original/Formatted toggle command calls - never on typing or caret movement, since
+        // nothing here listens to the editor's own caret events. Firing right before the swap
+        // (not after) is what lets this capture where the caret was in the *old* rendering,
+        // before UpdateEditorDocument below replaces the text under it.
+        if (e.PropertyName != nameof(SqlDocumentViewModel.CurrentSqlText) || _editor is null ||
+            sender is not SqlDocumentViewModel viewModel)
+        {
+            return;
+        }
+
+        _pendingCaretOffset = _editor.CaretOffset;
+        _pendingCaretWasFormatted = viewModel.IsShowingFormatted;
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -181,13 +203,56 @@ public partial class SqlDocumentView : UserControl
         if (_editor.Document is null)
         {
             _editor.Document = new TextDocument(newText);
+            // Explicit rather than assumed - a freshly assigned Document is expected to start
+            // with the caret at 0, but AvaloniaEdit's own TextEditor.Text setter resets it
+            // explicitly too after a full-text replace, so this makes no assumptions either.
+            _editor.CaretOffset = 0;
+            _pendingCaretOffset = null;
             return;
         }
 
         var scrollOffset = _editor.TextArea.TextView.ScrollOffset;
+        var hadFocus = _editor.TextArea.IsFocused;
+
+        // An Original/Formatted toggle: OnViewModelPropertyChanging captured where the caret was
+        // in the rendering we're leaving. Map it to the equivalent spot in the new text via the
+        // canonicalization service's token position data; only fall back to blindly restoring the
+        // old pixel scroll offset when no mapping was available (e.g. this script went through
+        // one of the service's fallback formatting paths).
+        int? mappedCaretOffset = null;
+        if (_pendingCaretOffset is { } fromOffset)
+        {
+            mappedCaretOffset = viewModel.MapCaretOffset(fromOffset, _pendingCaretWasFormatted);
+        }
+        _pendingCaretOffset = null;
+
         _editor.Document.Text = newText;
-        _editor.ScrollToHorizontalOffset(scrollOffset.X);
-        _editor.ScrollToVerticalOffset(scrollOffset.Y);
+
+        var editor = _editor;
+
+        // Deferred: the document was just swapped wholesale, and AvaloniaEdit's TextView needs a
+        // layout pass over the new content before caret placement/scroll-into-view and
+        // (re)focusing land correctly - doing this synchronously here was silently dropping
+        // keyboard focus out of the editor on every toggle (same class of timing issue as
+        // SearchPanel.Open() needing a deferred Reactivate() call elsewhere in this app).
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (mappedCaretOffset is { } toOffset)
+            {
+                editor.CaretOffset = Math.Clamp(toOffset, 0, newText.Length);
+                editor.TextArea.Caret.BringCaretToView();
+            }
+            else
+            {
+                editor.ScrollToHorizontalOffset(scrollOffset.X);
+                editor.ScrollToVerticalOffset(scrollOffset.Y);
+            }
+
+            if (hadFocus)
+            {
+                editor.TextArea.Focus();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void ApplyGrammar(string? scopeName)

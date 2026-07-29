@@ -36,6 +36,15 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
     [ObservableProperty]
     private ObservableCollection<SearchResultViewModel> _filteredResults = new();
 
+    // Drives the one-line summary shown in both results views: "Showing all X results." or,
+    // while a filter is active, "Showing X of Y results." IsFiltered mirrors whether any filter
+    // field currently has text, so the views can give the summary a subtle highlight only then.
+    [ObservableProperty]
+    private string _resultsSummaryText = "Showing all 0 results.";
+
+    [ObservableProperty]
+    private bool _isFiltered;
+
     public SearchResultsViewModel()
     {
         Id = "SearchResults";
@@ -118,5 +127,15 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
         });
 
         FilteredResults = new ObservableCollection<SearchResultViewModel>(filtered);
+
+        IsFiltered = !string.IsNullOrWhiteSpace(FilterGeneral) ||
+                     !string.IsNullOrWhiteSpace(FilterName) ||
+                     !string.IsNullOrWhiteSpace(FilterSchema) ||
+                     !string.IsNullOrWhiteSpace(FilterDb) ||
+                     !string.IsNullOrWhiteSpace(FilterType);
+
+        ResultsSummaryText = IsFiltered
+            ? $"Showing {FilteredResults.Count} of {_allResults.Count} results."
+            : $"Showing all {_allResults.Count} results.";
     }
 }

@@ -22,27 +22,38 @@ public sealed class SqlCanonicalizationService
 	/// attached regardless of this setting.
 	/// </param>
 	public string FormatForDisplay(string sql, bool openingParenOnNewLine = false)
+		=> FormatForDisplayCore(sql, openingParenOnNewLine).Text;
+
+	/// <summary>
+	/// Same formatting as <see cref="FormatForDisplay"/>, but also reports where each source
+	/// token landed in the output - see <see cref="SqlFormatResult.TokenPositions"/> for when
+	/// that mapping is and isn't available.
+	/// </summary>
+	public SqlFormatResult FormatForDisplayWithPositions(string sql, bool openingParenOnNewLine = false)
+		=> FormatForDisplayCore(sql, openingParenOnNewLine);
+
+	private SqlFormatResult FormatForDisplayCore(string sql, bool openingParenOnNewLine)
 	{
 		if (string.IsNullOrWhiteSpace(sql))
 		{
-			return sql;
+			return new SqlFormatResult(sql, null);
 		}
 
 		var sqlToFormat = NormalizeSingleLineCommentBoundaries(sql);
 		if (TryFormatCollapsedTryCatchFinally(sqlToFormat, out var tryCatchFinallyFormatted))
 		{
-			return tryCatchFinallyFormatted;
+			return new SqlFormatResult(tryCatchFinallyFormatted, null);
 		}
 
 		if (TryExtractSimpleSelectAssignment(sqlToFormat, out var assignmentPrefix, out var assignmentExpression, out var assignmentHasSemicolon))
 		{
 			var formattedExpression = FormatExpressionFallback(assignmentExpression, LongExpressionLineBreakThreshold);
-			return ComposeSelectAssignment(assignmentPrefix, formattedExpression, assignmentHasSemicolon);
+			return new SqlFormatResult(ComposeSelectAssignment(assignmentPrefix, formattedExpression, assignmentHasSemicolon), null);
 		}
 
 		if (TryFormatSimpleSelectWhereNoFrom(sqlToFormat, out var formattedSimpleSelectWhere))
 		{
-			return formattedSimpleSelectWhere;
+			return new SqlFormatResult(formattedSimpleSelectWhere, null);
 		}
 
 		try
@@ -58,13 +69,13 @@ public sealed class SqlCanonicalizationService
 
 			if (errors is not null && errors.Count > 0 && ShouldUseExpressionFallback(sqlToFormat))
 			{
-				return FormatExpressionFallback(sqlToFormat, LongExpressionLineBreakThreshold);
+				return new SqlFormatResult(FormatExpressionFallback(sqlToFormat, LongExpressionLineBreakThreshold), null);
 			}
 
 			var tokens = fragment.ScriptTokenStream;
 			if (tokens is null || tokens.Count == 0)
 			{
-				return sql;
+				return new SqlFormatResult(sql, null);
 			}
 
 			var statementBoundaryCollector = new StatementBoundaryCollector();
@@ -72,6 +83,11 @@ public sealed class SqlCanonicalizationService
 			var statementEndIndices = statementBoundaryCollector.LastTokenIndices;
 
 			var result = new StringBuilder();
+			// Captured as the very first thing each loop iteration does, before that token's own
+			// indent/text is appended - approximate (a token preceded by fresh indentation reports
+			// a start slightly before its actual text), which is fine for "roughly, if not
+			// literally" caret repositioning and avoids instrumenting every individual case below.
+			var tokenStartOffsets = new int[tokens.Count];
 			var indentLevel = 0;
 			var lineStart = true;
 			var previousWasStatementEnd = false;
@@ -188,6 +204,7 @@ public sealed class SqlCanonicalizationService
 			for (var i = 0; i < tokens.Count; i++)
 			{
 				var token = tokens[i];
+				tokenStartOffsets[i] = result.Length;
 
 				switch (token.TokenType)
 				{
@@ -1813,20 +1830,140 @@ public sealed class SqlCanonicalizationService
 				}
 			}
 
-			var formattedSql = result.ToString().TrimEnd();
-			var linesWithoutTrailingSpaces = formattedSql
-				.Replace("\r\n", "\n")
-				.Split('\n')
-				.Select(line => line.TrimEnd())
-				.ToArray();
-			return string.Join(Environment.NewLine, linesWithoutTrailingSpaces);
+			var (formattedSql, offsetMap) = TrimTrailingWhitespaceTrackingOffsets(result.ToString());
+
+			var normalizedToOriginalOffset = BuildNormalizedToOriginalOffsetMap(sql, sqlToFormat);
+			var tokenPositions = new List<SqlTokenPosition>(tokens.Count);
+			for (var tokenIndex = 0; tokenIndex < tokens.Count; tokenIndex++)
+			{
+				var positionToken = tokens[tokenIndex];
+				// The final token in the stream is an EndOfFile sentinel with a null Text - has no
+				// content to measure the length of.
+				var positionTokenLength = positionToken.Text?.Length ?? 0;
+				var sourceStart = normalizedToOriginalOffset[positionToken.Offset];
+				var sourceEnd = normalizedToOriginalOffset[positionToken.Offset + positionTokenLength];
+				var formattedStart = offsetMap[tokenStartOffsets[tokenIndex]];
+				tokenPositions.Add(new SqlTokenPosition(positionToken.TokenType, sourceStart, sourceEnd - sourceStart, formattedStart));
+			}
+
+			return new SqlFormatResult(formattedSql, tokenPositions);
 		}
 		catch
 		{
-			return ShouldUseExpressionFallback(sqlToFormat)
+			var fallbackText = ShouldUseExpressionFallback(sqlToFormat)
 				? FormatExpressionFallback(sqlToFormat, LongExpressionLineBreakThreshold)
 				: sqlToFormat;
+			return new SqlFormatResult(fallbackText, null);
 		}
+	}
+
+	// NormalizeSingleLineCommentBoundaries collapses "\r\n" to "\n" (and lone "\r" to "\n") before
+	// parsing, which shifts every ScriptDom token offset left of where it'd be in the caller's
+	// original text whenever a "\r\n" pair was collapsed to one character. This walks the
+	// original text once and records, for every offset in the normalized text, the corresponding
+	// offset in the original - needed to report token positions in terms of the text the caller
+	// actually passed in, not the internal normalized copy.
+	private static int[] BuildNormalizedToOriginalOffsetMap(string original, string normalized)
+	{
+		var map = new int[normalized.Length + 1];
+		var normalizedIndex = 0;
+		var originalIndex = 0;
+
+		while (normalizedIndex < normalized.Length && originalIndex < original.Length)
+		{
+			map[normalizedIndex] = originalIndex;
+
+			if (original[originalIndex] == '\r' && originalIndex + 1 < original.Length && original[originalIndex + 1] == '\n')
+			{
+				originalIndex += 2;
+			}
+			else
+			{
+				originalIndex++;
+			}
+
+			normalizedIndex++;
+		}
+
+		for (var i = normalizedIndex; i <= normalized.Length; i++)
+		{
+			map[i] = originalIndex;
+		}
+
+		return map;
+	}
+
+	// Reimplements the trailing-whitespace cleanup FormatForDisplay has always applied (trim the
+	// very end of the document, then trim trailing whitespace from every line) but also produces
+	// a raw-offset -> final-offset map, so the token start offsets captured against the untrimmed
+	// StringBuilder during the main loop can be translated to their position in the text actually
+	// returned. Behavior must stay identical to the plain trim this replaced - only the returned
+	// offset map is new.
+	private static (string Text, int[] OffsetMap) TrimTrailingWhitespaceTrackingOffsets(string raw)
+	{
+		var keepLength = raw.Length;
+		while (keepLength > 0 && char.IsWhiteSpace(raw[keepLength - 1]))
+		{
+			keepLength--;
+		}
+
+		var offsetMap = new int[raw.Length + 1];
+		var sb = new StringBuilder(keepLength);
+		var finalPos = 0;
+		var rawIndex = 0;
+
+		while (rawIndex < keepLength)
+		{
+			var newlineIndex = raw.IndexOf('\n', rawIndex, keepLength - rawIndex);
+			var lineEndExclusive = newlineIndex >= 0 ? newlineIndex : keepLength;
+
+			// A trailing '\r' is part of the "\r\n" pair, not this line's own content - it gets
+			// replaced by Environment.NewLine below rather than copied through directly.
+			var contentEnd = lineEndExclusive;
+			if (newlineIndex >= 0 && contentEnd > rawIndex && raw[contentEnd - 1] == '\r')
+			{
+				contentEnd--;
+			}
+
+			var trimmedContentEnd = contentEnd;
+			while (trimmedContentEnd > rawIndex && char.IsWhiteSpace(raw[trimmedContentEnd - 1]))
+			{
+				trimmedContentEnd--;
+			}
+
+			for (var p = rawIndex; p < trimmedContentEnd; p++)
+			{
+				offsetMap[p] = finalPos;
+				sb.Append(raw[p]);
+				finalPos++;
+			}
+
+			// Everything from the trimmed tail through this line's own line-ending collapses onto
+			// the position right after the kept content - a token offset that landed in stripped
+			// whitespace ends up at the nearest kept character instead.
+			for (var p = trimmedContentEnd; p <= lineEndExclusive; p++)
+			{
+				offsetMap[p] = finalPos;
+			}
+
+			if (newlineIndex >= 0)
+			{
+				sb.Append(Environment.NewLine);
+				finalPos += Environment.NewLine.Length;
+				rawIndex = newlineIndex + 1;
+			}
+			else
+			{
+				rawIndex = lineEndExclusive;
+			}
+		}
+
+		for (var p = rawIndex; p <= raw.Length; p++)
+		{
+			offsetMap[p] = finalPos;
+		}
+
+		return (sb.ToString(), offsetMap);
 	}
 
 	private static void AppendIndent(StringBuilder result, int indentLevel)

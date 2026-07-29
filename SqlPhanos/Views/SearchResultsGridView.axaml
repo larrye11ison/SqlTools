@@ -11,21 +11,41 @@
         <vm:SearchResultsGridViewModel/>
     </Design.DataContext>
 
+    <UserControl.Styles>
+        <!-- Subtle, not "nuclear" yellow - a translucent tint rather than a solid saturated
+             color, and only applied while a filter is actually active. -->
+        <Style Selector="Border.resultsFilterActive">
+            <Setter Property="Background" Value="#33E6C300" />
+        </Style>
+    </UserControl.Styles>
+
     <DockPanel>
         <!-- Same filter fields as the card view (SearchResultsView) - both bind straight
              through to the one shared SearchResultsViewModel, so filtering behaves
-             identically no matter which of the two views is currently showing. -->
-        <StackPanel DockPanel.Dock="Top"
-                    Orientation="Horizontal"
-                    Spacing="4"
-                    Margin="4"
-                    Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
-            <TextBox Text="{Binding SearchResults.FilterGeneral}" PlaceholderText="Filter (any field)" Width="220" Margin="2"/>
-            <TextBox Text="{Binding SearchResults.FilterName}" PlaceholderText="Name" Width="140" Margin="2"/>
-            <TextBox Text="{Binding SearchResults.FilterSchema}" PlaceholderText="Schema" Width="120" Margin="2"/>
-            <TextBox Text="{Binding SearchResults.FilterDb}" PlaceholderText="DB" Width="120" Margin="2"/>
-            <TextBox Text="{Binding SearchResults.FilterType}" PlaceholderText="Type" Width="120" Margin="2"/>
-        </StackPanel>
+             identically no matter which of the two views is currently showing. The results
+             summary sits in the same row, pinned to the right of the filter fields. -->
+        <Grid DockPanel.Dock="Top"
+              ColumnDefinitions="Auto,*"
+              Margin="4"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                <TextBox Text="{Binding SearchResults.FilterGeneral}" PlaceholderText="Filter (any field)" Width="220" Margin="2"/>
+                <TextBox Text="{Binding SearchResults.FilterName}" PlaceholderText="Name" Width="140" Margin="2"/>
+                <TextBox Text="{Binding SearchResults.FilterSchema}" PlaceholderText="Schema" Width="120" Margin="2"/>
+                <TextBox Text="{Binding SearchResults.FilterDb}" PlaceholderText="DB" Width="120" Margin="2"/>
+                <TextBox Text="{Binding SearchResults.FilterType}" PlaceholderText="Type" Width="120" Margin="2"/>
+            </StackPanel>
+
+            <Border Grid.Column="1"
+                    CornerRadius="3"
+                    Padding="6,2"
+                    Margin="8,2,2,2"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Classes.resultsFilterActive="{Binding SearchResults.IsFiltered}">
+                <TextBlock Text="{Binding SearchResults.ResultsSummaryText}" FontSize="11" Opacity="0.85"/>
+            </Border>
+        </Grid>
 
         <DataGrid x:Name="ResultsGrid"
                   ItemsSource="{Binding SearchResults.FilteredResults}"

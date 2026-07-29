@@ -44,6 +44,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private string _formattedSqlText = "";
     private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
+    private IReadOnlyList<SqlTokenPosition>? _tokenPositions;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource<bool>? _encryptedConsentTcs;
 
@@ -181,8 +182,10 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         try
         {
             var script = await ScriptWithConsentAsync(_cts.Token);
+            var formatResult = _sqlCanonicalizationService.FormatForDisplayWithPositions(script, FormattingSettingsService.OpeningParenOnNewLine);
             OriginalSqlText = script;
-            FormattedSqlText = _sqlCanonicalizationService.FormatForDisplay(script, FormattingSettingsService.OpeningParenOnNewLine);
+            FormattedSqlText = formatResult.Text;
+            _tokenPositions = formatResult.TokenPositions;
             CurrentSqlText = OriginalSqlText;
             DisplayMode = SqlDisplayMode.Original;
 
@@ -314,6 +317,48 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         DisplayMode = SqlDisplayMode.Original;
         CurrentSqlText = OriginalSqlText;
+    }
+
+    /// <summary>
+    /// Maps a caret offset in the text currently shown (Formatted if <paramref name="fromFormatted"/>,
+    /// Original otherwise) to the closest equivalent offset in the *other* rendering, using the
+    /// token position map captured when this script was last (re)loaded - lets the view keep the
+    /// caret "in the same place" across an Original/Formatted toggle. Returns null when no
+    /// mapping is available (e.g. this script went through one of the canonicalization service's
+    /// fallback formatting paths, which don't produce token positions).
+    /// </summary>
+    public int? MapCaretOffset(int offset, bool fromFormatted)
+    {
+        if (_tokenPositions is null || _tokenPositions.Count == 0)
+        {
+            return null;
+        }
+
+        SqlTokenPosition? nearest = null;
+        var bestDistance = int.MaxValue;
+
+        foreach (var tokenPosition in _tokenPositions)
+        {
+            var tokenStart = fromFormatted ? tokenPosition.FormattedOffset : tokenPosition.SourceOffset;
+            var distance = Math.Abs(tokenStart - offset);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                nearest = tokenPosition;
+            }
+        }
+
+        if (nearest is not { } match)
+        {
+            return null;
+        }
+
+        var matchedStart = fromFormatted ? match.FormattedOffset : match.SourceOffset;
+        var mappedStart = fromFormatted ? match.SourceOffset : match.FormattedOffset;
+
+        // Preserve the caret's position *within* the matched token (e.g. 3 characters into an
+        // identifier) rather than always snapping to the token's own start.
+        return mappedStart + (offset - matchedStart);
     }
 
     [RelayCommand]
