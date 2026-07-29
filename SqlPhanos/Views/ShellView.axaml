@@ -124,6 +124,15 @@
             <MenuItem Header="_Help">
                 <MenuItem Header="_About SqlPhanos..." Click="OnAboutClick"/>
             </MenuItem>
+            <!-- Hidden until UpdateCheckService finds a newer release; then this fades in/out
+                 (see ShellView.axaml.cs) to draw the eye without being obnoxious about it. -->
+            <MenuItem Name="UpdateAvailableMenuItem" Header="_Update Available" Click="OnCheckForUpdateClick" IsVisible="False">
+                <MenuItem.Transitions>
+                    <Transitions>
+                        <DoubleTransition Property="Opacity" Duration="0:0:0.5"/>
+                    </Transitions>
+                </MenuItem.Transitions>
+            </MenuItem>
         </Menu>
 
         <!-- Status bar at bottom -->

@@ -5,14 +5,13 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
       - master
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,12 +20,15 @@ concurrency:
 env:
   DOTNET_VERSION: 10.0.x
   PROJECT_PATH: ./SqlPhanos/SqlPhanos.csproj
+  UPDATER_PROJECT_PATH: ./SqlPhanos.Updater/SqlPhanos.Updater.csproj
   ARTIFACT_PATH: ${{ github.workspace }}/artifacts/sqlphanos
 
 jobs:
   build:
     name: Build
     runs-on: windows-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -52,11 +54,19 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
+      - name: Restore updater dependencies
+        run: dotnet restore ${{ env.UPDATER_PROJECT_PATH }}
+
       - name: Build
         run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
 
       - name: Publish
         run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --runtime win-x64 --self-contained false --output "${{ env.ARTIFACT_PATH }}"
+
+      - name: Publish updater
+        # Published into the same output folder as SqlPhanos itself - the updater's whole job is
+        # to sit next to SqlPhanos.exe in the install directory and swap it out in place.
+        run: dotnet publish ${{ env.UPDATER_PROJECT_PATH }} --configuration Release --runtime win-x64 --self-contained false --output "${{ env.ARTIFACT_PATH }}"
 
       - name: Strip native debug symbols
         shell: pwsh
@@ -69,3 +79,35 @@ jobs:
           path: ${{ env.ARTIFACT_PATH }}
           if-no-files-found: error
           retention-days: 7
+
+  release:
+    name: Release
+    needs: build
+    # Only real, deliberate version tags (v1.2.3, matching MinVerTagPrefix) publish a GitHub
+    # Release - ordinary pushes to main/master only get the build job's 7-day Actions artifact
+    # above, unchanged from before.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: SqlPhanos-Build
+          path: sqlphanos
+
+      - name: Create release archive
+        shell: pwsh
+        run: Compress-Archive -Path "sqlphanos/*" -DestinationPath "SqlPhanos-${{ github.ref_name }}-win-x64.zip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: SqlPhanos-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true
+          # MinVerTagPrefix-style prerelease tags (e.g. v1.2.0-beta) flag the Release as a
+          # prerelease automatically; plain vX.Y.Z tags publish as a normal release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
