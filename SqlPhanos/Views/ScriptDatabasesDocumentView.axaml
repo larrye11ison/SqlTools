@@ -90,7 +90,7 @@
             </StackPanel>
 
             <!-- Database list -->
-            <ListBox ItemsSource="{Binding Databases}" BorderThickness="0">
+            <ListBox DockPanel.Dock="Top" MaxHeight="220" ItemsSource="{Binding Databases}" BorderThickness="0">
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="sdb:DatabaseListItem">
                         <Grid ColumnDefinitions="Auto,2*,3*" Margin="0,2">
@@ -115,6 +115,20 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+
+            <!-- Per-object warnings log (e.g. a formatting safety-check failure) - objects can
+                 script concurrently, so this is populated live rather than only at the end,
+                 and stays a plain in-tab log rather than a pop-over since a modal per object
+                 would make a large run unusable. -->
+            <TextBlock DockPanel.Dock="Top" Text="Warnings" FontWeight="SemiBold" Margin="0,10,0,4"/>
+            <TextBox Text="{Binding WarningsLog}"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Consolas,monospace"
+                     FontSize="11"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
         </DockPanel>
 
         <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a

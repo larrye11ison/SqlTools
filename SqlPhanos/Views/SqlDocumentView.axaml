@@ -27,7 +27,7 @@
     </UserControl.Styles>
 
     <Grid>
-    <DockPanel IsEnabled="{Binding !PendingEncryptedConsent}">
+    <DockPanel IsEnabled="{Binding IsContentInteractive}">
         <!-- Scripting-in-progress banner: this document opens immediately (busy tab icon) and
              scripts itself, so this is the only place progress/cancel is shown - the Search
              Results pane that used to own this no longer tracks per-row scripting state. -->
@@ -141,6 +141,35 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
                     <Button x:Name="ConfirmDecryptButton" Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent" IsDefault="True"/>
                     <Button Command="{Binding DeclineDecryptCommand}" Content="Skip"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+
+    <!-- Formatting safety-check warning overlay: SqlCanonicalizationService re-verifies its own
+         output before returning it and falls back to the original, unformatted text rather than
+         risk handing back corrupted SQL - see SqlCanonicalizationService.IsRoundTripSafe. This
+         must be surfaced, not silently swallowed, so the user knows to report it. -->
+    <Grid x:Name="FormattingSafetyWarningOverlay" IsVisible="{Binding PendingFormattingSafetyWarning}" Background="#80000000">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="20"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MaxWidth="420">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Formatting was skipped" FontWeight="Bold" FontSize="16"/>
+                <TextBlock TextWrapping="Wrap">
+                    <Run Text="The formatter's own safety check found that reformatting "/>
+                    <Run Text="{Binding SchemaName}"/>
+                    <Run Text="."/>
+                    <Run Text="{Binding ObjectName}"/>
+                    <Run Text=" would not have reproduced the same SQL, so the original, unformatted script is shown instead. Nothing was changed or lost - please report this so the formatter bug can be fixed."/>
+                </TextBlock>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                    <Button Command="{Binding DismissFormattingSafetyWarningCommand}" Content="OK" Classes="accent" IsDefault="True"/>
                 </StackPanel>
             </StackPanel>
         </Border>

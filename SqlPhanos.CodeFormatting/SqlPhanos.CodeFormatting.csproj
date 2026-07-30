@@ -10,4 +10,8 @@
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="170.128.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SqlPhanos.CodeFormatting.Tests" />
+  </ItemGroup>
+
 </Project>

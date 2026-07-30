@@ -144,6 +144,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private string _statusMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsContentInteractive))]
     private bool _pendingEncryptedConsent;
 
     [ObservableProperty]
@@ -151,6 +152,21 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
     [ObservableProperty]
     private int _pendingEncryptedCount;
+
+    // Set from LoadAsync whenever SqlCanonicalizationService's own round-trip safety check
+    // rejected the formatted output (see IsRoundTripSafe) - FormattedSqlText is the original,
+    // unformatted text in that case, so there is nothing to toggle to. Gates ShowFormattedCommand
+    // shut for the rest of this load rather than just showing the warning once and leaving a
+    // dead "Reformatted" button that quietly does nothing if clicked.
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ShowFormattedCommand))]
+    private bool _formattingSafetyCheckFailed;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsContentInteractive))]
+    private bool _pendingFormattingSafetyWarning;
+
+    public bool IsContentInteractive => !PendingEncryptedConsent && !PendingFormattingSafetyWarning;
 
     // Parameterless constructor exists only for the XAML Design.DataContext tag.
     public SqlDocumentViewModel()
@@ -188,6 +204,8 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             _tokenPositions = formatResult.TokenPositions;
             CurrentSqlText = OriginalSqlText;
             DisplayMode = SqlDisplayMode.Original;
+            FormattingSafetyCheckFailed = !formatResult.SafetyCheckPassed;
+            PendingFormattingSafetyWarning = FormattingSafetyCheckFailed;
 
             try
             {
@@ -305,18 +323,26 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
     private bool CanRefresh => !IsScripting;
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanShowFormatted))]
     private void ShowFormatted()
     {
         DisplayMode = SqlDisplayMode.Formatted;
         CurrentSqlText = FormattedSqlText;
     }
 
+    private bool CanShowFormatted => !FormattingSafetyCheckFailed;
+
     [RelayCommand]
     private void ShowOriginal()
     {
         DisplayMode = SqlDisplayMode.Original;
         CurrentSqlText = OriginalSqlText;
+    }
+
+    [RelayCommand]
+    private void DismissFormattingSafetyWarning()
+    {
+        PendingFormattingSafetyWarning = false;
     }
 
     /// <summary>
@@ -364,7 +390,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [RelayCommand]
     private void ToggleDisplayMode()
     {
-        if (IsShowingOriginal)
+        if (IsShowingOriginal && CanShowFormatted)
         {
             ShowFormatted();
         }

@@ -13,7 +13,7 @@
     </Design.DataContext>
 
     <Grid>
-        <DockPanel IsEnabled="{Binding !ShowOverwriteConfirmation}">
+        <DockPanel IsEnabled="{Binding IsContentInteractive}">
             <!-- Header / toolbar -->
             <Border DockPanel.Dock="Top"
                     Background="{DynamicResource SystemAccentColor}"
@@ -84,6 +84,30 @@
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
                         <Button Content="Overwrite" Command="{Binding ConfirmOverwriteCommand}" Classes="accent"/>
                         <Button Content="Cancel" Command="{Binding CancelOverwriteCommand}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Formatting safety-check warning overlay: SqlCanonicalizationService re-verifies its
+             own output before returning it and falls back to leaving QueryText unchanged rather
+             than risk handing back corrupted SQL - see SqlCanonicalizationService.IsRoundTripSafe.
+             This must be surfaced, not silently swallowed, so the user knows to report it. -->
+        <Grid IsVisible="{Binding PendingFormattingSafetyWarning}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Formatting was skipped" FontWeight="Bold" FontSize="16"/>
+                    <TextBlock TextWrapping="Wrap"
+                               Text="The formatter's own safety check found that reformatting this query would not have reproduced the same SQL, so the text was left unchanged. Nothing was changed or lost - please report this so the formatter bug can be fixed."/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button Command="{Binding DismissFormattingSafetyWarningCommand}" Content="OK" Classes="accent" IsDefault="True"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
