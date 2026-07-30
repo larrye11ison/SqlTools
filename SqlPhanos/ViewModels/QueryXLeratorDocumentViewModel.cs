@@ -58,7 +58,18 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 	private bool _isInErrorState;
 
 	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(IsContentInteractive))]
 	private bool _showOverwriteConfirmation;
+
+	// Set when SqlCanonicalizationService's own round-trip safety check rejected the formatted
+	// output and fell back to returning QueryText unchanged - see IsRoundTripSafe. Must be
+	// surfaced rather than silently doing nothing, or the user has no way to know Reformat
+	// didn't actually do anything.
+	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(IsContentInteractive))]
+	private bool _pendingFormattingSafetyWarning;
+
+	public bool IsContentInteractive => !ShowOverwriteConfirmation && !PendingFormattingSafetyWarning;
 
 	public string ConnectionDisplayName { get; }
 
@@ -102,7 +113,15 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 			return;
 		}
 
-		QueryText = _sqlCanonicalizationService.FormatForDisplay(QueryText, FormattingSettingsService.OpeningParenOnNewLine);
+		var result = _sqlCanonicalizationService.FormatForDisplayWithPositions(QueryText, FormattingSettingsService.OpeningParenOnNewLine);
+		QueryText = result.Text;
+		PendingFormattingSafetyWarning = !result.SafetyCheckPassed;
+	}
+
+	[RelayCommand]
+	private void DismissFormattingSafetyWarning()
+	{
+		PendingFormattingSafetyWarning = false;
 	}
 
 	[RelayCommand(CanExecute = nameof(CanRunQuery))]

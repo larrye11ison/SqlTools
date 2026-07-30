@@ -32,7 +32,26 @@ public sealed class SqlCanonicalizationService
 	public SqlFormatResult FormatForDisplayWithPositions(string sql, bool openingParenOnNewLine = false)
 		=> FormatForDisplayCore(sql, openingParenOnNewLine);
 
+	// Every formatting path below - the regex-based fast paths, the main tokenizer loop, and the
+	// exception-driven fallbacks - has its own way to get comment/token handling subtly wrong (we
+	// found two independent examples of exactly that in one afternoon). Rather than trusting each
+	// path to be individually bug-free forever, this wrapper re-tokenizes whatever came out and
+	// verifies it represents the same real SQL as the input before handing it back - see
+	// IsRoundTripSafe. On failure it returns the original text unchanged: a silent no-op is an
+	// acceptable outcome for a formatter, silently corrupting the caller's script is not.
 	private SqlFormatResult FormatForDisplayCore(string sql, bool openingParenOnNewLine)
+	{
+		var result = FormatForDisplayCoreUnchecked(sql, openingParenOnNewLine);
+
+		if (string.IsNullOrWhiteSpace(sql) || IsRoundTripSafe(sql, result.Text))
+		{
+			return result;
+		}
+
+		return new SqlFormatResult(sql, null, safetyCheckPassed: false);
+	}
+
+	private SqlFormatResult FormatForDisplayCoreUnchecked(string sql, bool openingParenOnNewLine)
 	{
 		if (string.IsNullOrWhiteSpace(sql))
 		{
@@ -67,12 +86,13 @@ public sealed class SqlCanonicalizationService
 				fragment = parser.Parse(reader, out errors);
 			}
 
-			if (errors is not null && errors.Count > 0 && ShouldUseExpressionFallback(sqlToFormat))
+			var tokens = fragment.ScriptTokenStream;
+
+			if (errors is not null && errors.Count > 0 && ShouldUseExpressionFallback(sqlToFormat, tokens))
 			{
 				return new SqlFormatResult(FormatExpressionFallback(sqlToFormat, LongExpressionLineBreakThreshold), null);
 			}
 
-			var tokens = fragment.ScriptTokenStream;
 			if (tokens is null || tokens.Count == 0)
 			{
 				return new SqlFormatResult(sql, null);
@@ -125,6 +145,12 @@ public sealed class SqlCanonicalizationService
 			// confused with an outer, not-yet-resolved JOIN it happens to be nested inside.
 			var joinFramesByDepth = new Dictionary<int, Stack<JoinFrame>>();
 			var pendingBeginTryCatchFinally = false;
+			// True from a CREATE TRIGGER's "INSTEAD" through the end of its DML operation list
+			// (e.g. "INSTEAD OF UPDATE, DELETE") - keeps that whole clause glued onto one line
+			// regardless of how the source SQL happened to break it up, and stops UPDATE/INSERT
+			// from triggering their normal "start a new DML statement" handling (pendingUpdateSetClause
+			// etc.), which would otherwise corrupt formatting of whatever follows.
+			var inInsteadOfClause = false;
 			var betweenAndJustEmitted = false;
 			var inCreateObjectParameterList = false;
 			var createObjectParameterListDepth = -1;
@@ -205,6 +231,15 @@ public sealed class SqlCanonicalizationService
 			{
 				var token = tokens[i];
 				tokenStartOffsets[i] = result.Length;
+
+				if (inInsteadOfClause &&
+					token.TokenType is not (TSqlTokenType.WhiteSpace or TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment
+						or TSqlTokenType.Of or TSqlTokenType.Insert or TSqlTokenType.Update or TSqlTokenType.Delete or TSqlTokenType.Comma))
+				{
+					// Whatever comes after the DML operation list (AS, WITH APPEND, NOT FOR
+					// REPLICATION, ...) ends the clause and renders through its own normal case.
+					inInsteadOfClause = false;
+				}
 
 				switch (token.TokenType)
 				{
@@ -494,6 +529,14 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Insert:
+						if (inInsteadOfClause)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendLineIfNeeded(result, ref lineStart);
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
@@ -504,10 +547,37 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Update:
+						if (inInsteadOfClause)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendLineIfNeeded(result, ref lineStart);
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						pendingUpdateSetClause = true;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Of:
+						if (inInsteadOfClause)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						if (lineStart)
+						{
+							AppendIndent(result, GetColumnListIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inCreateStatementParams, inInsertColumnList, afterCreateObjectName, inUpdateSetClause, inExecParams));
+							lineStart = false;
+						}
+
+						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
 						break;
 
@@ -711,7 +781,19 @@ public sealed class SqlCanonicalizationService
 						var isAfterJoinModifier = previousJoinKeywordType is TSqlTokenType.Inner or TSqlTokenType.Left or TSqlTokenType.Right or TSqlTokenType.Outer or TSqlTokenType.Cross or TSqlTokenType.Full;
 						if (isAfterJoinModifier)
 						{
-							AppendSpaceIfNeeded(result, lineStart);
+							if (lineStart)
+							{
+								// A comment between the modifier and JOIN forced a line break (a
+								// comment always ends its own line) - re-indent to the modifier's
+								// own line instead of leaving JOIN glued to column 0 with lineStart
+								// stuck true, which would also swallow the space before the next
+								// token (AppendSpaceIfNeeded is a no-op at the start of a line).
+								AppendIndentIfNeeded(result, indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack), ref lineStart);
+							}
+							else
+							{
+								AppendSpaceIfNeeded(result, lineStart);
+							}
 						}
 						else
 						{
@@ -767,6 +849,28 @@ public sealed class SqlCanonicalizationService
 						}
 
 						result.Append(token.Text.ToUpperInvariant());
+
+						// Neither branch above routes through AppendIndentIfNeeded (the usual
+						// place lineStart gets cleared), so when ON is the first thing on a fresh
+						// line - a trigger's "ON table", not a JOIN's "ON condition" - lineStart
+						// was left stuck true: the WhiteSpace token right after ON then saw
+						// "!lineStart" as false and skipped itself entirely (including its own
+						// space-insertion logic), and the token after THAT rendered as if it were
+						// starting its own fresh line at indent 0 - i.e. nothing - gluing e.g.
+						// "ON" directly onto "[dbo]" with no separator at all.
+						lineStart = false;
+
+						// ON is a reserved word, so ScriptDom accepts e.g. "ON[dbo].[Table]" or
+						// "ON[PRIMARY]" with zero source whitespace (the following token's own
+						// delimiters, like a bracket, are enough to lex it as a separate token) -
+						// but readability still needs a space there. There's no WhiteSpace token
+						// in that case for the normal whitespace-handling logic to turn into one,
+						// so it has to be added explicitly right here instead.
+						if (i + 1 >= tokens.Count || tokens[i + 1].TokenType != TSqlTokenType.WhiteSpace)
+						{
+							result.Append(' ');
+						}
+
 						previousWasStatementEnd = false;
 						break;
 
@@ -928,6 +1032,14 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Comma:
+						if (inInsteadOfClause)
+						{
+							result.Append(',');
+							result.Append(' ');
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						if (lineStart)
 						{
 							AppendIndent(result, GetColumnListIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inCreateStatementParams, inInsertColumnList, afterCreateObjectName, inUpdateSetClause, inExecParams));
@@ -1437,6 +1549,17 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.WhiteSpace:
+						if (inInsteadOfClause)
+						{
+							// Every member of this clause (INSTEAD/OF/INSERT/UPDATE/DELETE/comma)
+							// already adds exactly the separator it needs - none of the newline-
+							// or space-insertion logic below knows about this clause, so letting it
+							// run here would reintroduce the very line breaks (or, once combined
+							// with those members' own spacing, doubled-up spaces) this exists to
+							// remove regardless of how the source SQL happened to space things.
+							break;
+						}
+
 						if (token.Text.Contains('\n') || token.Text.Contains('\r'))
 						{
 							if (afterCreateObjectName && !lineStart)
@@ -1494,12 +1617,15 @@ public sealed class SqlCanonicalizationService
 								var previousCreateIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 								var previousCreateType = previousCreateIndex >= 0 ? tokens[previousCreateIndex].TokenType : TSqlTokenType.None;
 								var nextCreateType = nextIndex < tokens.Count ? tokens[nextIndex].TokenType : TSqlTokenType.None;
-								// Two independent reasons to glue onto the same line: right after the
-								// CREATE TABLE/PROC/etc keyword itself (always, unrelated to paren
-								// placement - that's just "CREATE TABLE" staying on one line), or right
-								// before the parameter/column list's opening paren (only when the
-								// same-line option is in effect).
-								var glueAfterCreateKeyword = previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger or TSqlTokenType.Table;
+								// Three independent reasons to glue onto the same line: right after
+								// the CREATE TABLE/PROC/etc keyword itself (always, unrelated to
+								// paren placement - that's just "CREATE TABLE" staying on one line),
+								// right before the parameter/column list's opening paren (only when
+								// the same-line option is in effect), or right after a trigger's own
+								// "ON" (a CREATE TRIGGER's target table, not a JOIN's ON - JOIN's ON
+								// carries an open join frame and never reaches this branch, since
+								// afterCreateObjectName is a CREATE-statement-only flag).
+								var glueAfterCreateKeyword = previousCreateType is TSqlTokenType.Proc or TSqlTokenType.Procedure or TSqlTokenType.Function or TSqlTokenType.View or TSqlTokenType.Trigger or TSqlTokenType.Table or TSqlTokenType.On;
 								var glueBeforeParameterList = !openingParenOnNewLine && nextCreateType == TSqlTokenType.LeftParenthesis;
 								if (glueAfterCreateKeyword || glueBeforeParameterList)
 								{
@@ -1681,6 +1807,16 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
+						if (IsInsteadOfTriggerClauseStart(tokens, i))
+						{
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append("INSTEAD");
+							inInsteadOfClause = true;
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						if (inCreateStatementParams && token.Text.Equals("AS", StringComparison.OrdinalIgnoreCase))
 						{
 							AppendLineIfNeeded(result, ref lineStart);
@@ -1787,6 +1923,17 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					default:
+						// DELETE has no dedicated case (it's the only other DML keyword this
+						// clause can list, via IsKeyword below) - glue it inline like Insert/Update
+						// do rather than letting it take the normal indent-driven path.
+						if (inInsteadOfClause)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						if (lineStart)
 						{
 							AppendIndent(result, GetColumnListIndent(indentLevel, parenthesisStack, inSelectColumnList, selectStatementDepth, inCreateStatementParams, inInsertColumnList, afterCreateObjectName, inUpdateSetClause, inExecParams));
@@ -1850,11 +1997,167 @@ public sealed class SqlCanonicalizationService
 		}
 		catch
 		{
-			var fallbackText = ShouldUseExpressionFallback(sqlToFormat)
+			var fallbackText = ShouldUseExpressionFallback(sqlToFormat, TryTokenize(sqlToFormat))
 				? FormatExpressionFallback(sqlToFormat, LongExpressionLineBreakThreshold)
 				: sqlToFormat;
 			return new SqlFormatResult(fallbackText, null);
 		}
+	}
+
+	// Lexer-only tokenization - cheap, and far less likely to throw than a full Parse, but still
+	// guarded since callers include the round-trip safety check (which must never throw) and the
+	// catch-block fallback (which already runs from inside a catch block).
+	private static IList<TSqlParserToken>? TryTokenize(string sql)
+	{
+		try
+		{
+			var parser = new TSql160Parser(false);
+			using var reader = new StringReader(sql);
+			return parser.GetTokenStream(reader, out _);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	// The formatter has, on separate occasions, both silently swallowed real SQL into a dead
+	// comment and glued two adjacent tokens into one - each time because some rendering path got
+	// clever with text instead of trusting the token stream. This is the backstop: re-tokenize
+	// both sides and verify the formatted output contains the same real tokens, in the same
+	// order, as the input - so a bug like either of those produces a safe no-op instead of
+	// silently handing back corrupted SQL. Two adjustments account for changes the formatter
+	// makes on purpose: keyword/built-in-function casing (IsKeyword/IsBuiltInFunctionCall
+	// uppercase them) is compared case-insensitively, and an extra Semicolon in the formatted
+	// stream with no counterpart in the input is tolerated (the formatter adds a missing
+	// statement terminator - see the statementEndIndices handling above).
+	internal static bool IsRoundTripSafe(string originalSql, string formattedSql)
+	{
+		var originalTokens = TryTokenize(originalSql);
+		var formattedTokens = TryTokenize(formattedSql);
+
+		if (originalTokens is null || formattedTokens is null)
+		{
+			return false;
+		}
+
+		return SignificantTokenSequencesMatch(originalTokens, formattedTokens);
+	}
+
+	private static bool SignificantTokenSequencesMatch(IList<TSqlParserToken> originalTokens, IList<TSqlParserToken> formattedTokens)
+	{
+		var original = SignificantTokens(originalTokens);
+		var formatted = SignificantTokens(formattedTokens);
+
+		var i = 0;
+		var j = 0;
+		while (i < original.Count && j < formatted.Count)
+		{
+			if (TokensMatch(original[i], formatted[j]))
+			{
+				i++;
+				j++;
+				continue;
+			}
+
+			if (formatted[j].TokenType == TSqlTokenType.Semicolon)
+			{
+				j++;
+				continue;
+			}
+
+			// The IN-clause formatter deliberately repositions a comma relative to an immediately
+			// adjacent comment (leading-comma input becomes trailing-comma output, so the comment
+			// and the comma it sat next to swap places) - that changes textual order without
+			// changing meaning, so tolerate exactly this one local transposition rather than
+			// treating it as dropped or corrupted content.
+			if (i + 1 < original.Count && j + 1 < formatted.Count &&
+				IsReorderableConnector(original[i].TokenType) && IsReorderableConnector(formatted[j].TokenType) &&
+				TokensMatch(original[i], formatted[j + 1]) && TokensMatch(formatted[j], original[i + 1]))
+			{
+				i += 2;
+				j += 2;
+				continue;
+			}
+
+			return false;
+		}
+
+		while (j < formatted.Count && formatted[j].TokenType == TSqlTokenType.Semicolon)
+		{
+			j++;
+		}
+
+		return i == original.Count && j == formatted.Count;
+	}
+
+	private static bool IsReorderableConnector(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.Comma or TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment;
+	}
+
+	private static List<TSqlParserToken> SignificantTokens(IList<TSqlParserToken> tokens)
+	{
+		var result = new List<TSqlParserToken>(tokens.Count);
+		foreach (var token in tokens)
+		{
+			if (token.TokenType is not (TSqlTokenType.WhiteSpace or TSqlTokenType.EndOfFile))
+			{
+				result.Add(token);
+			}
+		}
+
+		return result;
+	}
+
+	private static bool TokensMatch(TSqlParserToken original, TSqlParserToken formatted)
+	{
+		if (original.TokenType != formatted.TokenType)
+		{
+			return false;
+		}
+
+		var comparison = RequiresCaseSensitiveRoundTripComparison(original)
+			? StringComparison.Ordinal
+			: StringComparison.OrdinalIgnoreCase;
+		return string.Equals(original.Text, formatted.Text, comparison);
+	}
+
+	// Words T-SQL treats as keywords in specific contexts but that ScriptDom still lexes as a
+	// plain Identifier, with no TSqlTokenType of their own - see IsTryCatchFinallyToken and
+	// IsInsteadOfTriggerClauseStart. The renderer intentionally uppercases these, so - like a
+	// recognized built-in function name - a case difference here is expected, not corruption.
+	private static readonly HashSet<string> ContextualKeywordIdentifiers = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"TRY", "CATCH", "FINALLY", "APPLY", "INSTEAD"
+	};
+
+	// Default to case-sensitive (the stricter, safer choice) and only relax it for token types
+	// the renderer is actually known to re-case on purpose: keywords (no explicit list needed -
+	// every reserved word has its own TSqlTokenType, so "not one of the types below" already
+	// means "keyword, punctuation, or something else with no letters to re-case") and identifiers
+	// that are recognized built-in function calls or contextual keywords (BuiltInFunctionNames /
+	// ContextualKeywordIdentifiers).
+	private static bool RequiresCaseSensitiveRoundTripComparison(TSqlParserToken token)
+	{
+		return token.TokenType switch
+		{
+			TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier =>
+				!BuiltInFunctionNames.Contains(token.Text) && !ContextualKeywordIdentifiers.Contains(token.Text),
+			TSqlTokenType.Variable or
+			TSqlTokenType.AsciiStringLiteral or
+			TSqlTokenType.AsciiStringOrQuotedIdentifier or
+			TSqlTokenType.UnicodeStringLiteral or
+			TSqlTokenType.SqlCommandIdentifier or
+			TSqlTokenType.SingleLineComment or
+			TSqlTokenType.MultilineComment or
+			TSqlTokenType.Integer or
+			TSqlTokenType.Numeric or
+			TSqlTokenType.Real or
+			TSqlTokenType.HexLiteral or
+			TSqlTokenType.Money => true,
+			_ => false
+		};
 	}
 
 	// NormalizeSingleLineCommentBoundaries collapses "\r\n" to "\n" (and lone "\r" to "\n") before
@@ -2864,6 +3167,23 @@ public sealed class SqlCanonicalizationService
 		return false;
 	}
 
+	// "INSTEAD" has no TSqlTokenType of its own (ScriptDom lexes it as a plain Identifier, like
+	// TRY/CATCH/FINALLY - see IsTryCatchFinallyToken) - this is the trigger that flips on
+	// inInsteadOfClause, so it only fires when the next real token is actually OF, not for some
+	// unrelated identifier that happens to be spelled "instead".
+	private static bool IsInsteadOfTriggerClauseStart(IList<TSqlParserToken> tokens, int index)
+	{
+		var token = tokens[index];
+		if (token.TokenType is not (TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier) ||
+			!token.Text.Equals("INSTEAD", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		var nextIndex = NextNonWhitespaceIndex(tokens, index + 1);
+		return nextIndex < tokens.Count && tokens[nextIndex].TokenType == TSqlTokenType.Of;
+	}
+
 	private static bool IsKeyword(TSqlTokenType tokenType)
 	{
 		return tokenType switch
@@ -2998,12 +3318,38 @@ public sealed class SqlCanonicalizationService
 	private static int NextNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
 	{
 		var index = startIndex;
-		while (index < tokens.Count && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
+		while (index < tokens.Count && IsWhitespaceOrComment(tokens[index].TokenType))
 		{
 			index++;
 		}
 
 		return index;
+	}
+
+	// Comments are trivia, like whitespace - a comment sitting between two real tokens (e.g.
+	// between a JOIN modifier and JOIN itself) must not defeat "what's the real adjacent token"
+	// adjacency checks built on NextNonWhitespaceIndex/PreviousNonWhitespaceIndex.
+	private static bool IsWhitespaceOrComment(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.WhiteSpace or TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment;
+	}
+
+	private static bool ContainsCommentToken(IList<TSqlParserToken>? tokens)
+	{
+		if (tokens is null)
+		{
+			return false;
+		}
+
+		for (var i = 0; i < tokens.Count; i++)
+		{
+			if (tokens[i].TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static string NormalizeSingleLineCommentBoundaries(string sql)
@@ -3041,7 +3387,7 @@ public sealed class SqlCanonicalizationService
 	private static int PreviousNonWhitespaceIndex(IList<TSqlParserToken> tokens, int startIndex)
 	{
 		var index = startIndex;
-		while (index >= 0 && tokens[index].TokenType == TSqlTokenType.WhiteSpace)
+		while (index >= 0 && IsWhitespaceOrComment(tokens[index].TokenType))
 		{
 			index--;
 		}
@@ -3270,9 +3616,19 @@ public sealed class SqlCanonicalizationService
 		return false;
 	}
 
-	private static bool ShouldUseExpressionFallback(string sql)
+	// FormatExpressionFallback collapses all whitespace - including the newline that terminates a
+	// "--" comment - and has no comment handling at all, so it must never run on SQL containing a
+	// comment (everything after "--" would silently become part of one dead, commented-out line).
+	// Trusting ScriptDom's own tokens here instead of re-scanning the string for "--" avoids a
+	// second, hand-written comment parser that could disagree with ScriptDom's.
+	private static bool ShouldUseExpressionFallback(string sql, IList<TSqlParserToken>? tokens)
 	{
 		if (string.IsNullOrWhiteSpace(sql))
+		{
+			return false;
+		}
+
+		if (ContainsCommentToken(tokens))
 		{
 			return false;
 		}

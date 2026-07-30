@@ -1399,6 +1399,200 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void LeadingCommentsBeforeUpdateDoNotCollapseWholeStatement()
+	{
+		// Regression test: comment-blind text heuristics (ShouldUseExpressionFallback and the
+		// naive FormatExpressionFallback renderer it can route into) used to decide whether to
+		// use a fast-path fallback by regex-collapsing all whitespace - including the newline
+		// that terminates a leading "--" comment - before checking whether the result started
+		// with a disallowed keyword like UPDATE. A statement preceded by "--" comment lines
+		// collapsed to text starting with "--" instead of "UPDATE", slipped past that check, and
+		// got rendered by a renderer with zero comment handling - turning the ENTIRE statement
+		// into one dead, fully-commented-out line.
+		var sql =
+			"        --INNER JOIN #gseLoans [l] ON l.[LoanID] = res.[LoanID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
+			"        --Update the loan close reason...\n" +
+			"        UPDATE c\n" +
+			"        SET\n" +
+			"            [c].[LoanClosedReason] = [po].[POReason]\n" +
+			"        FROM #closedLoans [c]\n" +
+			"                        INNER JOIN #gseLoans [l] ON [l].[LoanID] = [c].[LoanID]\n" +
+			"        -- changed to Miser.dbo.ASSET_DETAIL_DAILY not asset_detail (shouldn't this be as of data_date?)\n" +
+			"                        INNER JOIN Miser.dbo.ASSET_DETAIL_DAILY [ad] ON [ad].[LoanID] = [c].[LoanID]\n" +
+			"                            AND ad.DATA_DATE = @lastOfPreviousMonth\n" +
+			"                        INNER JOIN miser.dbo.StatusHist sh ON sh.LoanID = ad.LoanID\n" +
+			"                            AND sh.DATA_DATE = ad.DATA_DATE\n" +
+			"                        LEFT JOIN [Miser]..[FCMilestones] [M] ON [M].[LoanID] = [ad].[LoanID]\n" +
+			"                        LEFT JOIN #ResolutionsAndDispositionsBase [res] ON [res].[LoanID] = [c].[LoanID]\n" +
+			"                        LEFT JOIN #reomile rms ON rms.LoanId = c.LoanID\n" +
+			"                            AND rms.RowNum = 1\n" +
+			"                        LEFT JOIN Core.dbo.AssetAttribute gseDcd ON gseDcd.Assetid = c.LoanID\n" +
+			"                            AND gseDcd.AssetAttributeTypeID = @assetAttributeTypeId_GSEDealClosingDate\n" +
+			"                        OUTER APPLY\n" +
+			"        (\n" +
+			"            SELECT [POReason] = 12\n" +
+			"        )";
+
+		var expected =
+			"--INNER JOIN #gseLoans [l] ON l.[LoanID] = res.[LoanID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
+			"--Update the loan close reason...\n" +
+			"UPDATE c\n" +
+			"SET\n" +
+			"\t[c].[LoanClosedReason] = [po].[POReason]\n" +
+			"FROM #closedLoans [c]\n" +
+			"INNER JOIN #gseLoans [l] ON [l].[LoanID] = [c].[LoanID]\n" +
+			"-- changed to Miser.dbo.ASSET_DETAIL_DAILY not asset_detail (shouldn't this be as of data_date?)\n" +
+			"INNER JOIN Miser.dbo.ASSET_DETAIL_DAILY [ad] ON [ad].[LoanID] = [c].[LoanID]\n" +
+			"\tAND ad.DATA_DATE = @lastOfPreviousMonth\n" +
+			"INNER JOIN miser.dbo.StatusHist sh ON sh.LoanID = ad.LoanID\n" +
+			"\tAND sh.DATA_DATE = ad.DATA_DATE\n" +
+			"LEFT JOIN [Miser]..[FCMilestones] [M] ON [M].[LoanID] = [ad].[LoanID]\n" +
+			"LEFT JOIN #ResolutionsAndDispositionsBase [res] ON [res].[LoanID] = [c].[LoanID]\n" +
+			"LEFT JOIN #reomile rms ON rms.LoanId = c.LoanID\n" +
+			"\tAND rms.RowNum = 1\n" +
+			"LEFT JOIN Core.dbo.AssetAttribute gseDcd ON gseDcd.Assetid = c.LoanID\n" +
+			"\tAND gseDcd.AssetAttributeTypeID = @assetAttributeTypeId_GSEDealClosingDate\n" +
+			"OUTER APPLY\n" +
+			"(\n" +
+			"\tSELECT\n" +
+			"\t\t[POReason] = 12\n" +
+			")";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CommentBetweenJoinModifierAndJoinKeywordKeepsNormalIndentation()
+	{
+		// Regression test: NextNonWhitespaceIndex/PreviousNonWhitespaceIndex used to skip only
+		// whitespace tokens, not comments, so a comment sitting between a JOIN modifier (LEFT,
+		// INNER, etc.) and the JOIN keyword itself defeated the "is this JOIN preceded by a
+		// modifier" adjacency check on both sides - the modifier was rendered as if it weren't a
+		// join at all, and JOIN was then misclassified as an independent bare join, which (when
+		// another join frame was still open) got spuriously treated as nested and over-indented.
+		var sql =
+			"SELECT *\n" +
+			"FROM A a\n" +
+			"LEFT\n" +
+			"-- note\n" +
+			"JOIN B b ON b.Id = a.Id\n" +
+			"INNER JOIN C c ON c.Id = a.Id;";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM A a\n" +
+			"LEFT\n" +
+			"-- note\n" +
+			"JOIN B b ON b.Id = a.Id\n" +
+			"INNER JOIN C c ON c.Id = a.Id;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CommentBetweenCompleteJoinClausesKeepsIndentationFlat()
+	{
+		// Regression test mirroring the reported repro: a chain of INNER JOIN/LEFT JOIN clauses
+		// with a "--" comment sitting between two complete JOIN...ON clauses must not throw off
+		// indentation for the JOINs that follow the comment.
+		var sql =
+			"SELECT *\n" +
+			"FROM A a\n" +
+			"INNER JOIN B b ON b.Id = a.Id\n" +
+			"-- switched to C per ticket 123\n" +
+			"INNER JOIN C c ON c.Id = a.Id\n" +
+			"LEFT JOIN D d ON d.Id = a.Id;";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM A a\n" +
+			"INNER JOIN B b ON b.Id = a.Id\n" +
+			"-- switched to C per ticket 123\n" +
+			"INNER JOIN C c ON c.Id = a.Id\n" +
+			"LEFT JOIN D d ON d.Id = a.Id;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void TriggerOnClauseGetsSpaceWhenSourceHasNone()
+	{
+		// ScriptDom accepts "ON[dbo].[Table]" with zero source whitespace - ON is a reserved
+		// word, so the brackets alone are enough to lex it as a separate token - but there's no
+		// WhiteSpace token there for the normal whitespace-handling logic to turn into a space.
+		var sql =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON[dbo].[TrigTest]\n" +
+			"INSTEAD OF UPDATE\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		var expected =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON [dbo].[TrigTest]\n" +
+			"INSTEAD OF UPDATE\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void InsteadOfTriggerClauseIsUppercasedAndJoinedOntoOneLine()
+	{
+		// INSTEAD has no TSqlTokenType of its own (lexed as a plain Identifier, like TRY/CATCH/
+		// FINALLY), and OF is easy to lose track of case-wise since it's not in the formatter's
+		// general keyword list - both need explicit handling, not just IsKeyword. The whole
+		// clause must land on one line regardless of how the source broke it up.
+		var sql =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON [dbo].[TrigTest]\n" +
+			"instead\n" +
+			"of\n" +
+			"UPDATE\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		var expected =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON [dbo].[TrigTest]\n" +
+			"INSTEAD OF UPDATE\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void InsteadOfTriggerClauseHandlesMultipleOperationsRegardlessOfSourceLayout()
+	{
+		// Covers the multi-operation shapes explicitly called out when this was reported: comma
+		// placement, casing, and line breaks in the source must not affect the single-line,
+		// comma-space-separated output.
+		var sql =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON [dbo].[TrigTest]\n" +
+			"instead\n" +
+			"of\n" +
+			"UPDATE,\n" +
+			"delete\n" +
+			",INSERT\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		var expected =
+			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
+			"ON [dbo].[TrigTest]\n" +
+			"INSTEAD OF UPDATE, DELETE, INSERT\n" +
+			"AS\n" +
+			"PRINT 1;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void ChainedJoinsWithBetweenClauseFormatCorrectly()
 	{
 		// Regression test for the #LoanListDataTape join chain in FullSuiteMBADelinquency.sql:
@@ -1740,6 +1934,44 @@ public sealed class SqlCanonicalizationServiceTests
 		}
 
 		return sb.ToString();
+	}
+
+	// IsRoundTripSafe is the backstop that keeps a future rendering bug from silently handing
+	// back corrupted SQL (see the whole-query-collapse and JOIN-gluing bugs this was written
+	// after) - these tests pin both halves of that contract: legitimate formatter behavior
+	// (case normalization, an inserted terminator, comma/comment repositioning) must never trip
+	// it, and real content loss/mangling must always trip it.
+
+	[Theory]
+	[InlineData("SELECT 1", "SELECT\n\t1", "whitespace-only reformatting")]
+	[InlineData("SELECT 1", "SELECT 1;", "a missing statement terminator gets added")]
+	[InlineData("select a from t where 1 = 1", "SELECT a\nFROM t\nWHERE 1 = 1", "keywords get uppercased")]
+	[InlineData("select isnull(x, 0)", "SELECT\n\tISNULL(x, 0)", "a recognized built-in function name gets uppercased")]
+	public void RoundTripSafeForLegitimateFormatterChanges(string original, string formatted, string because)
+	{
+		Assert.True(SqlCanonicalizationService.IsRoundTripSafe(original, formatted), because);
+	}
+
+	[Fact]
+	public void RoundTripSafeWhenLeadingCommaBecomesTrailingCommaAcrossAComment()
+	{
+		// The exact transformation LongInClauseKeepsLineCommentsOnTheirOwnLine relies on: the
+		// comma and the comment next to it swap textual order, but no value or comment is lost.
+		var original = "SELECT * FROM t WHERE x IN (1\n-- note\n, 2)";
+		var formatted = "SELECT\n\t*\nFROM t\nWHERE x IN (\n\t1,\n\t-- note\n\t2\n)";
+
+		Assert.True(SqlCanonicalizationService.IsRoundTripSafe(original, formatted));
+	}
+
+	[Theory]
+	[InlineData("SELECT 1 -- keep this comment", "SELECT 1", "a trailing comment is dropped")]
+	[InlineData("SELECT a, b FROM t", "SELECT a FROM t", "a real column is dropped")]
+	[InlineData("SELECT a FROM t", "SELECT b FROM t", "an identifier's text is changed")]
+	[InlineData("SELECT * FROM A LEFT\n-- note\nJOIN B ON B.Id = A.Id", "SELECT * FROM A LEFT\n-- note\nJOINB ON B.Id = A.Id", "two tokens get glued into one (JOIN + B -> JOINB)")]
+	[InlineData("SELECT 1; SELECT 2", "SELECT 1", "a whole trailing statement is dropped")]
+	public void RoundTripUnsafeWhenContentIsLostOrChanged(string original, string formatted, string because)
+	{
+		Assert.False(SqlCanonicalizationService.IsRoundTripSafe(original, formatted), because);
 	}
 
 	private string NormalizeWhitespace(string input)

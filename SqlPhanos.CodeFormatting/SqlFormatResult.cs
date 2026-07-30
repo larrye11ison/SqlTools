@@ -33,10 +33,11 @@ public readonly struct SqlTokenPosition
 /// </summary>
 public sealed class SqlFormatResult
 {
-	public SqlFormatResult(string text, IReadOnlyList<SqlTokenPosition>? tokenPositions)
+	public SqlFormatResult(string text, IReadOnlyList<SqlTokenPosition>? tokenPositions, bool safetyCheckPassed = true)
 	{
 		Text = text;
 		TokenPositions = tokenPositions;
+		SafetyCheckPassed = safetyCheckPassed;
 	}
 
 	public string Text { get; }
@@ -48,4 +49,12 @@ public sealed class SqlFormatResult
 	/// an empty-but-usable list.
 	/// </summary>
 	public IReadOnlyList<SqlTokenPosition>? TokenPositions { get; }
+
+	/// <summary>
+	/// False when the formatter produced output that didn't tokenize back to the same real SQL
+	/// as the input (see SqlCanonicalizationService's round-trip check) and Text was replaced
+	/// with the original, unformatted input as a result - callers can use this to warn the user
+	/// that formatting was skipped rather than silently showing no change.
+	/// </summary>
+	public bool SafetyCheckPassed { get; }
 }
