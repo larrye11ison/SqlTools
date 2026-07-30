@@ -781,7 +781,27 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
-						AppendIndentIfNeeded(result, joinIndent, ref lineStart);
+						// Not a join modifier - e.g. LEFT()/RIGHT() called as a function inside an
+						// already-open condition (LEFT/RIGHT are reserved words regardless of
+						// context, so ScriptDom hands back the same TSqlTokenType.Left/Right
+						// either way). lineStart can already be false here (mid-line, following
+						// something like "ON "), in which case AppendIndentIfNeeded alone is a
+						// no-op - it only ever adds indentation on a fresh line, never a plain
+						// separating space - which glued e.g. "ON" directly onto "LEFT(" with no
+						// space at all. Only add that space back when the source actually had
+						// whitespace here (i.e. StartsOnNewLine made the WhiteSpace case defer to
+						// this case instead of adding its own space) - unconditionally adding one
+						// would also wrongly separate e.g. "UPPER(LEFT(..." at the open paren,
+						// where the source never had whitespace to begin with.
+						if (lineStart)
+						{
+							AppendIndentIfNeeded(result, joinIndent, ref lineStart);
+						}
+						else if (i > 0 && tokens[i - 1].TokenType == TSqlTokenType.WhiteSpace)
+						{
+							AppendSpaceIfNeeded(result, lineStart);
+						}
+
 						result.Append(token.Text.ToUpperInvariant());
 						previousWasStatementEnd = false;
 						break;
@@ -1350,7 +1370,17 @@ public sealed class SqlCanonicalizationService
 						if (inInClause && parenthesisDepth == inClauseDepth)
 						{
 							var inClauseLength = result.Length - inClauseStartIndex;
-							if (inClauseLength > 0)
+							// inSubqueryInClause must be excluded here - ShouldFormatInClauseMultiline/
+							// FormatInClauseMultiline below are built only for a comma-separated
+							// value list (IN (1, 2, 3)) and don't know anything about
+							// "IN (SELECT ...)"; the dedicated subquery handling a few lines down
+							// (if (inSubqueryInClause)) was unreachable whenever this block's own
+							// length-based check happened to also fire first, so a long/multi-line
+							// subquery got its WHERE/FROM clauses and any embedded comments run
+							// through the value-list splitter - which inserts a trailing comma
+							// after every "value" it finds, fabricating commas like
+							// "DB1..TableB c (NOLOCK)," and "WHERE," out of nowhere.
+							if (inClauseLength > 0 && !inSubqueryInClause)
 							{
 								var inClauseContent = result.ToString(inClauseStartIndex, inClauseLength);
 								if (ShouldFormatInClauseMultiline(inClauseContent, indentLevel))
@@ -1518,10 +1548,22 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Semicolon:
-						// A semicolon must always attach directly to the preceding content, even if
-						// an earlier token's own line-break logic (e.g. a closing paren ending an IN
-						// clause/subquery) already left the cursor at the start of a fresh line.
-						TrimTrailingLineEndings(result);
+						if (PrecedingRealTokenIsComment(tokens, i))
+						{
+							// Gluing onto the preceding content (below) would land the semicolon on
+							// a "--" comment's own line, inside the comment's extent - silently
+							// commenting the terminator itself out. Start a fresh line instead.
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						}
+						else
+						{
+							// A semicolon must always attach directly to the preceding content, even
+							// if an earlier token's own line-break logic (e.g. a closing paren ending
+							// an IN clause/subquery) already left the cursor at the start of a fresh
+							// line.
+							TrimTrailingLineEndings(result);
+						}
+
 						result.Append(token.Text);
 						result.AppendLine();
 						lineStart = true;
@@ -1960,7 +2002,21 @@ public sealed class SqlCanonicalizationService
 
 				if (statementEndIndices.Contains(i))
 				{
-					TrimTrailingLineEndings(result);
+					// ScriptDom's own AST can attribute a trailing "--" comment to a statement as
+					// its LastTokenIndex (e.g. a run of comment lines right before a batch's
+					// natural end) rather than pointing at the statement's actual last real
+					// content. token IS that comment here - its own case above already appended
+					// its text and forced a fresh line after itself, so gluing (via
+					// TrimTrailingLineEndings) would put the injected terminator back on the
+					// comment's own line, inside its extent.
+					if (token.TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
+					{
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+					}
+					else
+					{
+						TrimTrailingLineEndings(result);
+					}
 
 					if (token.TokenType != TSqlTokenType.Semicolon)
 					{
@@ -3434,6 +3490,20 @@ public sealed class SqlCanonicalizationService
 			TSqlTokenType.NullIf => true,
 			_ => false
 		};
+	}
+
+	// True when the nearest real (non-whitespace) token before `index` is a comment - i.e. the
+	// content currently at the end of `result` is trapped inside that comment's own extent, so
+	// nothing may be glued onto the same line without silently becoming part of the comment.
+	private static bool PrecedingRealTokenIsComment(IList<TSqlParserToken> tokens, int index)
+	{
+		var i = index - 1;
+		while (i >= 0 && tokens[i].TokenType == TSqlTokenType.WhiteSpace)
+		{
+			i--;
+		}
+
+		return i >= 0 && tokens[i].TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment;
 	}
 
 	private static bool IsOnlyClosingParenthesesLine(string line)

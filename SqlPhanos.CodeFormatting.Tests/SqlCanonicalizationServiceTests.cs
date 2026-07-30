@@ -70,35 +70,35 @@ public sealed class SqlCanonicalizationServiceTests
 		// on the default (same-line) placement, even when (as here) the INSERT source itself
 		// already had the paren on its own line - the formatter normalizes it.
 		var sql = """
-			CREATE TABLE #loanList (
-				CoreAssetID INT PRIMARY KEY CLUSTERED,
-				LoanID VARCHAR(10)
+			CREATE TABLE #ItemList (
+				TheIDNumber INT PRIMARY KEY CLUSTERED,
+				MasterIDNumber VARCHAR(10)
 			);
 
-			INSERT INTO #loanList
+			INSERT INTO #ItemList
 			(
-				CoreAssetID,
-				LoanID
+				TheIDNumber,
+				MasterIDNumber
 			)
 			SELECT
-				x.CoreAssetID,
-				x.LoanID
-			FROM @loanList x;
+				x.TheIDNumber,
+				x.MasterIDNumber
+			FROM @ItemList x;
 			""";
 		var expected = """
-			CREATE TABLE #loanList (
-				CoreAssetID INT PRIMARY KEY CLUSTERED,
-				LoanID VARCHAR(10)
+			CREATE TABLE #ItemList (
+				TheIDNumber INT PRIMARY KEY CLUSTERED,
+				MasterIDNumber VARCHAR(10)
 			);
 
-			INSERT INTO #loanList (
-				CoreAssetID,
-				LoanID
+			INSERT INTO #ItemList (
+				TheIDNumber,
+				MasterIDNumber
 			)
 			SELECT
-				x.CoreAssetID,
-				x.LoanID
-			FROM @loanList x;
+				x.TheIDNumber,
+				x.MasterIDNumber
+			FROM @ItemList x;
 			""";
 
 		RunFactTest(sql, expected);
@@ -108,36 +108,36 @@ public sealed class SqlCanonicalizationServiceTests
 	public void OpeningParenOnNewLineOptionAppliesToCreateTableAndInsertConsistently()
 	{
 		var sql = """
-			CREATE TABLE #loanList (
-				CoreAssetID INT PRIMARY KEY CLUSTERED,
-				LoanID VARCHAR(10)
+			CREATE TABLE #ItemList (
+				TheIDNumber INT PRIMARY KEY CLUSTERED,
+				MasterIDNumber VARCHAR(10)
 			);
 
-			INSERT INTO #loanList (
-				CoreAssetID,
-				LoanID
+			INSERT INTO #ItemList (
+				TheIDNumber,
+				MasterIDNumber
 			)
 			SELECT
-				x.CoreAssetID,
-				x.LoanID
-			FROM @loanList x;
+				x.TheIDNumber,
+				x.MasterIDNumber
+			FROM @ItemList x;
 			""";
 		var expected = """
-			CREATE TABLE #loanList
+			CREATE TABLE #ItemList
 			(
-				CoreAssetID INT PRIMARY KEY CLUSTERED,
-				LoanID VARCHAR(10)
+				TheIDNumber INT PRIMARY KEY CLUSTERED,
+				MasterIDNumber VARCHAR(10)
 			);
 
-			INSERT INTO #loanList
+			INSERT INTO #ItemList
 			(
-				CoreAssetID,
-				LoanID
+				TheIDNumber,
+				MasterIDNumber
 			)
 			SELECT
-				x.CoreAssetID,
-				x.LoanID
-			FROM @loanList x;
+				x.TheIDNumber,
+				x.MasterIDNumber
+			FROM @ItemList x;
 			""";
 
 		RunFactTest(sql, expected, openingParenOnNewLine: true);
@@ -226,11 +226,11 @@ public sealed class SqlCanonicalizationServiceTests
 		// CAST(...) or ROW_NUMBER() call - which then got mistaken for the insert's own column
 		// list and mangled (broken across lines it should never have broken across, sometimes
 		// bleeding into unrelated statements much further down the same batch).
-		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt";
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM DB2.dbo.TimeTable dt";
 		var expected = """
 			INSERT INTO #dateRangeLastTwelve
 			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
-			FROM OperationalDatamart.dbo.D_Time dt;
+			FROM DB2.dbo.TimeTable dt;
 			""";
 
 		RunFactTest(sql, expected);
@@ -242,17 +242,17 @@ public sealed class SqlCanonicalizationServiceTests
 		// Same pendingInsertColumnList leak as InsertIntoSelectWithoutColumnListDoesNotCorruptLaterParentheses,
 		// but for ROW_NUMBER()'s empty argument list specifically: the stray "(" of ROW_NUMBER()
 		// was mistaken for the insert column list opener, splitting "()" across four lines.
-		var sql = "INSERT INTO #dilDates\nSELECT\n\t[l].[LoanID],\n\tROW_NUMBER() OVER (PARTITION BY l.LoanID ORDER BY [lmd].[DeedInLieuDate] DESC) AS RowNum\nFROM LossMitDatesBase lmd";
+		var sql = "INSERT INTO #dilDates\nSELECT\n\t[l].[MasterIDNumber],\n\tROW_NUMBER() OVER (PARTITION BY l.MasterIDNumber ORDER BY [lmd].[SomeOtherDate] DESC) AS RowNum\nFROM SourceTableX lmd";
 		var expected = """
 			INSERT INTO #dilDates
 			SELECT
-				[l].[LoanID],
+				[l].[MasterIDNumber],
 				ROW_NUMBER()
 				OVER (
-					PARTITION BY l.LoanID
-					ORDER BY [lmd].[DeedInLieuDate] DESC
+					PARTITION BY l.MasterIDNumber
+					ORDER BY [lmd].[SomeOtherDate] DESC
 				) AS RowNum
-			FROM LossMitDatesBase lmd;
+			FROM SourceTableX lmd;
 			""";
 
 		RunFactTest(sql, expected);
@@ -264,15 +264,15 @@ public sealed class SqlCanonicalizationServiceTests
 		// Same pendingInsertColumnList leak: a stuck flag from an earlier INSERT INTO ... SELECT
 		// (no column list) survived across statement boundaries and corrupted an unrelated,
 		// later CREATE TABLE's VARCHAR(10) column-length parens.
-		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt\n\nCREATE TABLE #closedLoans (\n\t[LoanID] VARCHAR(10) PRIMARY KEY CLUSTERED,\n\t[LoanClosedDate] DATETIME\n)";
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM DB2.dbo.TimeTable dt\n\nCREATE TABLE #TempB (\n\t[MasterIDNumber] VARCHAR(10) PRIMARY KEY CLUSTERED,\n\t[TheMainThingClosedDate] DATETIME\n)";
 		var expected = """
 			INSERT INTO #dateRangeLastTwelve
 			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
-			FROM OperationalDatamart.dbo.D_Time dt;
+			FROM DB2.dbo.TimeTable dt;
 
-			CREATE TABLE #closedLoans (
-				[LoanID] VARCHAR(10) PRIMARY KEY CLUSTERED,
-				[LoanClosedDate] DATETIME
+			CREATE TABLE #TempB (
+				[MasterIDNumber] VARCHAR(10) PRIMARY KEY CLUSTERED,
+				[TheMainThingClosedDate] DATETIME
 			);
 			""";
 
@@ -285,14 +285,14 @@ public sealed class SqlCanonicalizationServiceTests
 		// Same pendingInsertColumnList leak: the "fmt" alias immediately following the closing
 		// paren of an OUTER APPLY subquery was dropped to its own line instead of staying glued
 		// to ")", once a preceding INSERT INTO ... SELECT (no column list) left the flag stuck.
-		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM OperationalDatamart.dbo.D_Time dt\n\nSELECT\n\tfb.LoanID\nFROM Core.dbo.LossMitigationForbearanceWorkflow fb\nOUTER APPLY (\n\tSELECT 1 AS X\n) fmt";
+		var sql = "INSERT INTO #dateRangeLastTwelve\nSELECT CAST(dt.date_id AS DATE) AS DATA_DATE\nFROM DB2.dbo.TimeTable dt\n\nSELECT\n\tfb.MasterIDNumber\nFROM DB3.dbo.LegalThingTable fb\nOUTER APPLY (\n\tSELECT 1 AS X\n) fmt";
 		var expected = """
 			INSERT INTO #dateRangeLastTwelve
 			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
-			FROM OperationalDatamart.dbo.D_Time dt;
+			FROM DB2.dbo.TimeTable dt;
 
-			SELECT fb.LoanID
-			FROM Core.dbo.LossMitigationForbearanceWorkflow fb
+			SELECT fb.MasterIDNumber
+			FROM DB3.dbo.LegalThingTable fb
 			OUTER APPLY
 			(
 				SELECT
@@ -309,11 +309,11 @@ public sealed class SqlCanonicalizationServiceTests
 		// ALTER TABLE / ADD CONSTRAINT [name] / PRIMARY KEY CLUSTERED (...) always break onto
 		// three separate lines regardless of column count, but the column list itself only
 		// expands across multiple lines when there is more than one column.
-		var sql = "ALTER TABLE #currentLastSix ADD CONSTRAINT [pk_currentLastSix_LoanID] PRIMARY KEY CLUSTERED (LoanID)";
+		var sql = "ALTER TABLE #currentLastSix ADD CONSTRAINT [pk_currentLastSix_MasterIDNumber] PRIMARY KEY CLUSTERED (MasterIDNumber)";
 		var expected = """
 			ALTER TABLE #currentLastSix
-			ADD CONSTRAINT [pk_currentLastSix_LoanID]
-			PRIMARY KEY CLUSTERED (LoanID);
+			ADD CONSTRAINT [pk_currentLastSix_MasterIDNumber]
+			PRIMARY KEY CLUSTERED (MasterIDNumber);
 			""";
 
 		RunFactTest(sql, expected);
@@ -322,12 +322,12 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void AlterTableAddConstraintPrimaryKeyMultiColumnExpandsColumnList()
 	{
-		var sql = "ALTER TABLE #delinquencies ADD CONSTRAINT [pk_delinquencies_LoanID_DATA_DATE] PRIMARY KEY CLUSTERED ( LoanID, DATA_DATE)";
+		var sql = "ALTER TABLE #delinquencies ADD CONSTRAINT [pk_delinquencies_MasterIDNumber_DATA_DATE] PRIMARY KEY CLUSTERED ( MasterIDNumber, DATA_DATE)";
 		var expected = """
 			ALTER TABLE #delinquencies
-			ADD CONSTRAINT [pk_delinquencies_LoanID_DATA_DATE]
+			ADD CONSTRAINT [pk_delinquencies_MasterIDNumber_DATA_DATE]
 			PRIMARY KEY CLUSTERED (
-				LoanID,
+				MasterIDNumber,
 				DATA_DATE
 			);
 			""";
@@ -341,10 +341,10 @@ public sealed class SqlCanonicalizationServiceTests
 		// With no CONSTRAINT [name] clause, ADD and PRIMARY KEY CLUSTERED share a line - the
 		// same way ADD and CONSTRAINT do when a name is given - since there is no separate
 		// constraint-name clause to justify a break between them.
-		var sql = "ALTER TABLE #curMba ADD PRIMARY KEY CLUSTERED ([LoanID])";
+		var sql = "ALTER TABLE #curTable ADD PRIMARY KEY CLUSTERED ([MasterIDNumber])";
 		var expected = """
-			ALTER TABLE #curMba
-			ADD PRIMARY KEY CLUSTERED ([LoanID]);
+			ALTER TABLE #curTable
+			ADD PRIMARY KEY CLUSTERED ([MasterIDNumber]);
 			""";
 
 		RunFactTest(sql, expected);
@@ -353,11 +353,11 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void AlterTableAddPrimaryKeyWithoutConstraintNameMultiColumnExpandsColumnList()
 	{
-		var sql = "ALTER TABLE #prevDeferBal ADD PRIMARY KEY CLUSTERED ( LoanID, RowId, SubCode)";
+		var sql = "ALTER TABLE #prevDeferBal ADD PRIMARY KEY CLUSTERED ( MasterIDNumber, RowId, SubCode)";
 		var expected = """
 			ALTER TABLE #prevDeferBal
 			ADD PRIMARY KEY CLUSTERED (
-				LoanID,
+				MasterIDNumber,
 				RowId,
 				SubCode
 			);
@@ -388,16 +388,16 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void RowNumberOverWithTrailingAliasBreaksOverOntoOwnLine()
 	{
-		var sql = "SELECT\n\tad.LoanID,\n\tROW_NUMBER() OVER (PARTITION BY ad.LoanID ORDER BY ad.DATA_DATE DESC) AS RowNum\nFROM Miser.dbo.ASSET_DETAIL_DAILY ad";
+		var sql = "SELECT\n\tad.MasterIDNumber,\n\tROW_NUMBER() OVER (PARTITION BY ad.MasterIDNumber ORDER BY ad.DATA_DATE DESC) AS RowNum\nFROM DB1.dbo.ThingJustLikeTheOtherThingDetailDaily ad";
 		var expected = """
 			SELECT
-				ad.LoanID,
+				ad.MasterIDNumber,
 				ROW_NUMBER()
 				OVER (
-					PARTITION BY ad.LoanID
+					PARTITION BY ad.MasterIDNumber
 					ORDER BY ad.DATA_DATE DESC
 				) AS RowNum
-			FROM Miser.dbo.ASSET_DETAIL_DAILY ad;
+			FROM DB1.dbo.ThingJustLikeTheOtherThingDetailDaily ad;
 			""";
 
 		RunFactTest(sql, expected);
@@ -653,7 +653,7 @@ public sealed class SqlCanonicalizationServiceTests
 		// to put the argument list on its own line.
 		var expected = """
 			SELECT CAST(dt.date_id AS DATE) AS DATA_DATE
-			FROM OperationalDatamart.dbo.D_Time dt
+			FROM DB2.dbo.TimeTable dt
 			WHERE dt.date_id > DATEADD(month, - 12, @lastOfPreviousMonth)
 				AND dt.date_id <= @lastOfPreviousMonth
 				AND dt.IsMonthEnd = 1;
@@ -702,10 +702,10 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		// UPDATE ... SET col1 = v1, col2 = v2 WHERE ... was not covered by any existing test.
 		var expected = """
-			UPDATE Asset_Detail
+			UPDATE ThingJustLikeTheOtherThingTable
 			SET
-				INGOMAR_MARK_DESC = 'Paid',
-				INGOMAR_MARK = 4
+				STATUS_DESC = 'Paid',
+				STATUS_CODE = 4
 			WHERE ISNULL(PrincipalBal, 0) = 0;
 			""";
 
@@ -719,18 +719,18 @@ public sealed class SqlCanonicalizationServiceTests
 		// WHERE ... NOT IN (subquery) whose own FROM also carries a hint glued directly to the
 		// table name (no space) - all distinct from the simpler literal-list IN clause tests.
 		var expected = """
-			UPDATE Asset_Detail
+			UPDATE ThingJustLikeTheOtherThingTable
 			SET
 				MARK = 1,
 				MARK_CODE = 'REMIC'
-			FROM Asset_Detail AD
-			INNER JOIN ParticipationMasterHist PMH (NOLOCK) ON PMH.LoanID = AD.LoanId
+			FROM ThingJustLikeTheOtherThingTable AD
+			INNER JOIN PastStuffJoinTable PMH (NOLOCK) ON PMH.MasterIDNumber = AD.MasterIDNumber
 				AND PMH.DATA_DATE = AD.DATA_DATE
 			WHERE PMH.RecordTypeID = '6'
-				AND AD.InvestorId NOT IN
+				AND AD.InterestedPartyId NOT IN
 				(
-					SELECT INVESTOR_ID
-					FROM SNMLT_INVESTOR(NOLOCK)
+					SELECT InterestedParty_ID
+					FROM InterestedPartyLookup(NOLOCK)
 				);
 			""";
 
@@ -745,27 +745,27 @@ public sealed class SqlCanonicalizationServiceTests
 		// Regression coverage: a JOIN nested inside a CTE's parenthesized body was losing its
 		// indentation entirely (landing at column 0 instead of matching FROM).
 		var expected = """
-			WITH histWithUpb AS (
+			WITH cteWithBalance AS (
 				SELECT
-					[h].[LoanID],
+					[h].[MasterIDNumber],
 					MAX([TransactionDate]) AS [LastActiveDate]
-				FROM Service.dbo.History h
-				INNER JOIN Service.dbo.Loan l ON l.LoanID = h.LoanID
-				GROUP BY [h].[LoanID]
+				FROM DB4.dbo.PastStuffTable h
+				INNER JOIN DB4.dbo.TheMainThingTable l ON l.MasterIDNumber = h.MasterIDNumber
+				GROUP BY [h].[MasterIDNumber]
 				HAVING MAX([TransactionDate]) <= @lastOfPreviousMonth
-				), histWithoutUpb AS (
+				), cteWithoutBalance AS (
 				SELECT
-					[h].[LoanID],
+					[h].[MasterIDNumber],
 					MIN([TransactionDate]) AS [FirstNotActiveDate]
-				FROM Service.dbo.History h
-				INNER JOIN histWithUpb u ON u.LoanID = h.LoanID
-				GROUP BY [h].[LoanID]
+				FROM DB4.dbo.PastStuffTable h
+				INNER JOIN cteWithBalance u ON u.MasterIDNumber = h.MasterIDNumber
+				GROUP BY [h].[MasterIDNumber]
 				)
-			INSERT INTO #closedLoans
+			INSERT INTO #TempB
 			SELECT
-				[LoanID],
+				[MasterIDNumber],
 				[FirstNotActiveDate]
-			FROM histWithoutUpb;
+			FROM cteWithoutBalance;
 			""";
 
 		RunFactTest(expected);
@@ -782,14 +782,14 @@ public sealed class SqlCanonicalizationServiceTests
 		// window spec's parens forced to expand regardless of length.
 		var expected = """
 			SELECT
-				[lfb].[LoanID],
+				[lfb].[MasterIDNumber],
 				[RowId] = ROW_NUMBER()
 				OVER (
-					PARTITION BY [lfb].[LoanID],
+					PARTITION BY [lfb].[MasterIDNumber],
 					[lfb].[SubCode]
 					ORDER BY [lfb].[DataDate] DESC
 				)
-			FROM Miser.dbo.LoanFeeBalancesHistory lfb;
+			FROM DB1.dbo.TheMainThingFeePastStuff lfb;
 			""";
 
 		RunFactTest(expected);
@@ -805,12 +805,12 @@ public sealed class SqlCanonicalizationServiceTests
 		// CASE (and END) sitting at column 0 instead of matching sibling columns.
 		var expected = """
 			SELECT
-				CASE ad.OccupancyStatus
-					WHEN 'Owner Occupied' THEN 'Owner Occupied'
-					WHEN 'Vacant' THEN 'Vacant'
+				CASE ad.ThingThatMayOrMayNotBeTrueStatus
+					WHEN 'Blerg' THEN 'IsBlerg'
+					WHEN 'NotBlerg' THEN 'NotBlerg'
 					ELSE 'Unknown'
-				END AS OccupancyStatus
-			FROM Asset_Detail ad;
+				END AS ThingThatMayOrMayNotBeTrueStatus
+			FROM ThingJustLikeTheOtherThingTable ad;
 			""";
 
 		RunFactTest(expected);
@@ -847,14 +847,14 @@ public sealed class SqlCanonicalizationServiceTests
 		// definition and its following ", nextColumn" left the comma stranded at column 0
 		// instead of indented at the column-list level.
 		var expected = """
-			CREATE TABLE #gseLoans (
-				[LoanID] VARCHAR(12) PRIMARY KEY CLUSTERED,
-				[MonthEndPrinAmount] MONEY,
-				[UPBShortFall] MONEY
-				-- Extra data (from AD2.. but StepRate is not captured historically)
+			CREATE TABLE #TempA (
+				[MasterIDNumber] VARCHAR(12) PRIMARY KEY CLUSTERED,
+				[MonthEndAmountOfMony] MONEY,
+				[SomeMoneyThingShortFall] MONEY
+				-- Extra data (from AD2.. but ChangeThing is not captured historically)
 				,
-				[StepRate1Date] DATE NULL,
-				[StepRate2Date] DATE NULL
+				[ChangeThing1Date] DATE NULL,
+				[ChangeThing2Date] DATE NULL
 			);
 			""";
 
@@ -867,18 +867,18 @@ public sealed class SqlCanonicalizationServiceTests
 		// CREATE TABLE column lists always break one column per line, like CREATE PROCEDURE
 		// parameter lists do, rather than packing multiple short columns onto one line.
 		var expected = """
-			CREATE TABLE #gseLoans (
-				[LoanID] VARCHAR(12) PRIMARY KEY CLUSTERED,
-				[MonthEndPrinAmount] MONEY,
-				[MonthStartPrinAmount] MONEY,
-				[AquiredUPB] MONEY,
-				[UPBShortFall] MONEY,
-				[StepRate1Date] DATE NULL,
-				[StepRate2Date] DATE NULL,
-				[StepRate3Date] DATE NULL,
-				[StepRate4Date] DATE NULL,
-				[StepRate5Date] DATE NULL,
-				[StepRate6Date] DATE NULL
+			CREATE TABLE #TempA (
+				[MasterIDNumber] VARCHAR(12) PRIMARY KEY CLUSTERED,
+				[MonthEndAmountOfMony] MONEY,
+				[MonthStartAmountOfMony] MONEY,
+				[AquiredSomeMoneyThing] MONEY,
+				[SomeMoneyThingShortFall] MONEY,
+				[ChangeThing1Date] DATE NULL,
+				[ChangeThing2Date] DATE NULL,
+				[ChangeThing3Date] DATE NULL,
+				[ChangeThing4Date] DATE NULL,
+				[ChangeThing5Date] DATE NULL,
+				[ChangeThing6Date] DATE NULL
 			);
 			""";
 
@@ -907,11 +907,11 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		var expected = """
 			SELECT
-				fb.LoanID,
+				fb.MasterIDNumber,
 				fb.ReviewPmtPlanSubStatus,
-			FROM Core.dbo.LossMitigationForbearanceWorkflow fb
-			INNER JOIN #gseLoans l ON l.LoanID = fb.LoanID
-			OUTER APPLY 
+			FROM DB3.dbo.LegalThingTable fb
+			INNER JOIN #TempA l ON l.MasterIDNumber = fb.MasterIDNumber
+			OUTER APPLY
 			(
 				SELECT
 					'A' AS Stud,
@@ -1038,24 +1038,24 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
-	public void FullSuiteMBADelinquency()
+	public void FullSuiteRealWorldSample()
 	{
 		string sql;
-		using (var reader = new StreamReader("CodeSamples/FullSuiteMBADelinquency.sql"))
+		using (var reader = new StreamReader("CodeSamples/FullSuiteRealWorldSample.sql"))
 		{
 			sql = reader.ReadToEnd();
 		}
 
 		var formatted = service.FormatForDisplay(sql);
 		Assert.False(string.IsNullOrWhiteSpace(formatted));
-		_output.WriteLine("Here is the formatted output for FullSuiteMBADelinquency.sql:");
+		_output.WriteLine("Here is the formatted output for FullSuiteRealWorldSample.sql:");
 		_output.WriteLine(formatted);
 	}
 
 	[Fact]
 	public void ArithmeticExpressionWithNestedCaseIndentsLogically()
 	{
-		// Regression test for the MBADaysDelinquent expression in FullSuiteMBADelinquency.sql:
+		// Regression test for the DaysPastDue expression in FullSuiteRealWorldSample.sql:
 		// operator-joined terms that fit within the line-length threshold stay on their own
 		// line at the same indent, and each nested paren (including CASE...END, which behaves
 		// like an implicit paren for indentation purposes) indents its content one level deeper
@@ -1084,9 +1084,9 @@ public sealed class SqlCanonicalizationServiceTests
 							END
 						)
 					)
-				) + 1 AS MBADaysDelinquent,
-				NULL AS DelinquencyStringCode
-			FROM ASSET_DETAIL_DAILY ad;
+				) + 1 AS DaysPastDue,
+				NULL AS StatusCode
+			FROM ThingJustLikeTheOtherThingDetailDaily ad;
 			""";
 
 		RunFactTest(expected);
@@ -1153,22 +1153,22 @@ public sealed class SqlCanonicalizationServiceTests
 		// scope already contributed, double-counting that level and over-indenting variables one
 		// tab deeper than plain expressions (function calls, NULL, literals) in the exact same
 		// list. Mirrors a real-world INSERT with a mix of @variables and expressions.
-		var sql = "INSERT INTO INTERACTION\n(\n\tCORE_ASSET_ID,\n\tOUTCOME_ID,\n\tINTERACTION_SUBJECT,\n\tDATE_TIME_MODIFIED,\n\tPERSON_MODIFYING_ID\n)\nVALUES\n(\n\t@CORE_ASSET_ID,\n\t@OUTCOME_ID,\n\tCOALESCE(@INTERACTION_SUBJECT, ''),\n\tGETDATE(),\n\t@PERSON_MODIFYING_ID\n)";
+		var sql = "INSERT INTO RECORD_LOG\n(\n\tENTITY_ID,\n\tRESULT_ID,\n\tRECORD_SUBJECT,\n\tMODIFIED_DATE,\n\tMODIFIED_BY_ID\n)\nVALUES\n(\n\t@ENTITY_ID,\n\t@RESULT_ID,\n\tCOALESCE(@RECORD_SUBJECT, ''),\n\tGETDATE(),\n\t@MODIFIED_BY_ID\n)";
 		var expected = """
-			INSERT INTO INTERACTION (
-				CORE_ASSET_ID,
-				OUTCOME_ID,
-				INTERACTION_SUBJECT,
-				DATE_TIME_MODIFIED,
-				PERSON_MODIFYING_ID
+			INSERT INTO RECORD_LOG (
+				ENTITY_ID,
+				RESULT_ID,
+				RECORD_SUBJECT,
+				MODIFIED_DATE,
+				MODIFIED_BY_ID
 			)
 			VALUES
 			(
-				@CORE_ASSET_ID,
-				@OUTCOME_ID,
-				COALESCE(@INTERACTION_SUBJECT, ''),
+				@ENTITY_ID,
+				@RESULT_ID,
+				COALESCE(@RECORD_SUBJECT, ''),
 				GETDATE(),
-				@PERSON_MODIFYING_ID
+				@MODIFIED_BY_ID
 			);
 			""";
 
@@ -1254,14 +1254,14 @@ public sealed class SqlCanonicalizationServiceTests
 		// Built with explicit \t/\n escapes rather than this file's usual triple-quoted raw
 		// string, since this test specifically asserts on exact tab placement and a raw string
 		// literal makes stray-space-vs-tab mistakes invisible.
-		var sql = "SELECT * FROM History WHERE 1 = 1 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170);";
+		var sql = "SELECT * FROM PastStuff WHERE 1 = 1 AND PastStuff.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170);";
 
 		var expected =
 			"SELECT\n" +
 			"\t*\n" +
-			"FROM History\n" +
+			"FROM PastStuff\n" +
 			"WHERE 1 = 1\n" +
-			"\tAND History.SubCode IN (\n" +
+			"\tAND PastStuff.SubCode IN (\n" +
 			"\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
 			"\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
 			"\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
@@ -1278,25 +1278,25 @@ public sealed class SqlCanonicalizationServiceTests
 		// merged with an adjacent value - the previous plain Split(',') treated a comment plus
 		// everything up to the next comma as a single "value", silently swallowing the real
 		// value's own comma and gluing unrelated text together.
-		var sql = "SELECT * FROM History WHERE 1 = 1 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
-			"-- Added 172 mapping here 2020-08-05 JProfumo TASC127392 (per Matt..)\n" +
+		var sql = "SELECT * FROM PastStuff WHERE 1 = 1 AND PastStuff.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
+			"-- Added 172 mapping here 2020-08-05 Jdudejp TASC127392 (per Matt..)\n" +
 			", 171\n" +
-			"-- Added 171 mapping here 2021-05-28 JProfumo TASC133635\n" +
+			"-- Added 171 mapping here 2021-05-28 Jdudejp TASC133635\n" +
 			", 170);";
 
 		var expected =
 			"SELECT\n" +
 			"\t*\n" +
-			"FROM History\n" +
+			"FROM PastStuff\n" +
 			"WHERE 1 = 1\n" +
-			"\tAND History.SubCode IN (\n" +
+			"\tAND PastStuff.SubCode IN (\n" +
 			"\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
 			"\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
 			"\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
 			"\t\t207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172,\n" +
-			"\t\t-- Added 172 mapping here 2020-08-05 JProfumo TASC127392 (per Matt..)\n" +
+			"\t\t-- Added 172 mapping here 2020-08-05 Jdudejp TASC127392 (per Matt..)\n" +
 			"\t\t171,\n" +
-			"\t\t-- Added 171 mapping here 2021-05-28 JProfumo TASC133635\n" +
+			"\t\t-- Added 171 mapping here 2021-05-28 Jdudejp TASC133635\n" +
 			"\t\t170\n" +
 			"\t);";
 
@@ -1311,17 +1311,17 @@ public sealed class SqlCanonicalizationServiceTests
 		// under-indented relative to its own "IN (" line, because indentLevel doesn't track that
 		// nesting the same way the text actually on the page does. The fix reads the indent
 		// directly off the "IN (" line itself, so values always land one tab deeper than
-		// wherever that line actually ended up - 3 tabs here, one more than "AND History.SubCode
+		// wherever that line actually ended up - 3 tabs here, one more than "AND PastStuff.SubCode
 		// IN ("'s own 2.
-		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode IN (250, 251)) OR (History.TransactionCode = 330 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170)) THEN 1 END FROM History;";
+		var sql = "SELECT FEES_AMT = CASE WHEN (PastStuff.SomeCode IN (250, 251)) OR (PastStuff.SomeCode = 330 AND PastStuff.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172, 171, 170)) THEN 1 END FROM PastStuff;";
 
 		var expected =
 			"SELECT FEES_AMT =\n" +
 			"CASE\n" +
-			"\tWHEN (History.TransactionCode IN (250, 251))\n" +
+			"\tWHEN (PastStuff.SomeCode IN (250, 251))\n" +
 			"\t\tOR (\n" +
-			"\t\tHistory.TransactionCode = 330\n" +
-			"\t\tAND History.SubCode IN (\n" +
+			"\t\tPastStuff.SomeCode = 330\n" +
+			"\t\tAND PastStuff.SubCode IN (\n" +
 			"\t\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
 			"\t\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
 			"\t\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
@@ -1329,7 +1329,7 @@ public sealed class SqlCanonicalizationServiceTests
 			"\t\t)\n" +
 			"\t\t) THEN 1\n" +
 			"END\n" +
-			"FROM History;";
+			"FROM PastStuff;";
 
 		RunFactTest(sql, expected);
 	}
@@ -1346,17 +1346,17 @@ public sealed class SqlCanonicalizationServiceTests
 		// instead of starting a new one, so the OR right after the wrapping parenthesis's own
 		// close ended up glued to the same line with a pile of stray tabs between them instead
 		// of on its own line.
-		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode = 1) OR (History.TransactionCode = 330 AND History.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
+		var sql = "SELECT FEES_AMT = CASE WHEN (PastStuff.SomeCode = 1) OR (PastStuff.SomeCode = 330 AND PastStuff.SubCode IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192, 251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240, 241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208, 207, 206, 205, 204, 203, 185, 183, 182, 181, 180, 178, 177, 176, 174, 173, 172\n" +
 			"-- trailing comment before close\n" +
-			")) OR (History.TransactionCode = 2) THEN 1 END FROM History;";
+			")) OR (PastStuff.SomeCode = 2) THEN 1 END FROM PastStuff;";
 
 		var expected =
 			"SELECT FEES_AMT =\n" +
 			"CASE\n" +
-			"\tWHEN (History.TransactionCode = 1)\n" +
+			"\tWHEN (PastStuff.SomeCode = 1)\n" +
 			"\t\tOR (\n" +
-			"\t\tHistory.TransactionCode = 330\n" +
-			"\t\tAND History.SubCode IN (\n" +
+			"\t\tPastStuff.SomeCode = 330\n" +
+			"\t\tAND PastStuff.SubCode IN (\n" +
 			"\t\t\t0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 21, 96, 97, 98, 99, 100, 120, 121, 123, 101, 106, 109, 110, 111, 192,\n" +
 			"\t\t\t251, 252, 253, 249, 254, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 237, 238, 239, 240,\n" +
 			"\t\t\t241, 242, 243, 17, 25, 244, 245, 246, 247, 213, 214, 215, 216, 217, 218, 219, 220, 211, 212, 189, 210, 248, 209, 208,\n" +
@@ -1364,9 +1364,9 @@ public sealed class SqlCanonicalizationServiceTests
 			"\t\t\t-- trailing comment before close\n" +
 			"\t\t)\n" +
 			"\t\t)\n" +
-			"\t\tOR (History.TransactionCode = 2) THEN 1\n" +
+			"\t\tOR (PastStuff.SomeCode = 2) THEN 1\n" +
 			"END\n" +
-			"FROM History;";
+			"FROM PastStuff;";
 
 		RunFactTest(sql, expected);
 	}
@@ -1380,20 +1380,20 @@ public sealed class SqlCanonicalizationServiceTests
 		// no indent at all, and the token right after it wrongly absorbed the indent that should
 		// have belonged to THEN instead - because AppendSpaceIfNeeded, unlike
 		// AppendIndentIfNeeded, is a no-op at the start of a line and never clears lineStart.
-		var sql = "SELECT FEES_AMT = CASE WHEN History.TransactionCode = 330 AND (ISNULL(investortypename, '') <> '3rd Party' OR ParentInvestorID IN ('7074', 'F00043')) -- Prior Servicer, Forbearance, and Arrearage Late Charges for TPS only.  - mdeibler 8/16/2017\nTHEN CONVERT(VARCHAR(13), History.TransactionAmt) END FROM History;";
+		var sql = "SELECT FEES_AMT = CASE WHEN PastStuff.SomeCode = 330 AND (ISNULL(InterestedPartytypename, '') <> '3rd Party' OR ParentInterestedPartyID IN ('7074', 'F00043')) -- Prior Servicer, LegalThing, and Arrearage Late Charges for TPS only.  - mdudemd 8/16/2017\nTHEN CONVERT(VARCHAR(13), PastStuff.TransactionAmt) END FROM PastStuff;";
 
 		var expected =
 			"SELECT FEES_AMT =\n" +
 			"CASE\n" +
-			"\tWHEN History.TransactionCode = 330\n" +
+			"\tWHEN PastStuff.SomeCode = 330\n" +
 			"\t\tAND (\n" +
-			"\t\tISNULL(investortypename, '') <> '3rd Party'\n" +
-			"\t\tOR ParentInvestorID IN ('7074', 'F00043')\n" +
+			"\t\tISNULL(InterestedPartytypename, '') <> '3rd Party'\n" +
+			"\t\tOR ParentInterestedPartyID IN ('7074', 'F00043')\n" +
 			"\t\t)\n" +
-			"\t-- Prior Servicer, Forbearance, and Arrearage Late Charges for TPS only.  - mdeibler 8/16/2017\n" +
-			"\tTHEN CONVERT(VARCHAR(13), History.TransactionAmt)\n" +
+			"\t-- Prior Servicer, LegalThing, and Arrearage Late Charges for TPS only.  - mdudemd 8/16/2017\n" +
+			"\tTHEN CONVERT(VARCHAR(13), PastStuff.TransactionAmt)\n" +
 			"END\n" +
-			"FROM History;";
+			"FROM PastStuff;";
 
 		RunFactTest(sql, expected);
 	}
@@ -1410,52 +1410,52 @@ public sealed class SqlCanonicalizationServiceTests
 		// got rendered by a renderer with zero comment handling - turning the ENTIRE statement
 		// into one dead, fully-commented-out line.
 		var sql =
-			"        --INNER JOIN #gseLoans [l] ON l.[LoanID] = res.[LoanID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
-			"        --Update the loan close reason...\n" +
+			"        --INNER JOIN #TableA [l] ON l.[RecordID] = res.[RecordID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
+			"        --Update the closed reason...\n" +
 			"        UPDATE c\n" +
 			"        SET\n" +
-			"            [c].[LoanClosedReason] = [po].[POReason]\n" +
-			"        FROM #closedLoans [c]\n" +
-			"                        INNER JOIN #gseLoans [l] ON [l].[LoanID] = [c].[LoanID]\n" +
-			"        -- changed to Miser.dbo.ASSET_DETAIL_DAILY not asset_detail (shouldn't this be as of data_date?)\n" +
-			"                        INNER JOIN Miser.dbo.ASSET_DETAIL_DAILY [ad] ON [ad].[LoanID] = [c].[LoanID]\n" +
+			"            [c].[ClosedReason] = [po].[Reason1]\n" +
+			"        FROM #TableB [c]\n" +
+			"                        INNER JOIN #TableA [l] ON [l].[RecordID] = [c].[RecordID]\n" +
+			"        -- changed to DB1.dbo.TableC not ThingJustLikeTheOtherThing_detail (shouldn't this be as of data_date?)\n" +
+			"                        INNER JOIN DB1.dbo.TableC [ad] ON [ad].[RecordID] = [c].[RecordID]\n" +
 			"                            AND ad.DATA_DATE = @lastOfPreviousMonth\n" +
-			"                        INNER JOIN miser.dbo.StatusHist sh ON sh.LoanID = ad.LoanID\n" +
+			"                        INNER JOIN db1.dbo.TableD sh ON sh.RecordID = ad.RecordID\n" +
 			"                            AND sh.DATA_DATE = ad.DATA_DATE\n" +
-			"                        LEFT JOIN [Miser]..[FCMilestones] [M] ON [M].[LoanID] = [ad].[LoanID]\n" +
-			"                        LEFT JOIN #ResolutionsAndDispositionsBase [res] ON [res].[LoanID] = [c].[LoanID]\n" +
-			"                        LEFT JOIN #reomile rms ON rms.LoanId = c.LoanID\n" +
+			"                        LEFT JOIN [DB1]..[TableE] [M] ON [M].[RecordID] = [ad].[RecordID]\n" +
+			"                        LEFT JOIN #TableF [res] ON [res].[RecordID] = [c].[RecordID]\n" +
+			"                        LEFT JOIN #TableG rms ON rms.RecordId = c.RecordID\n" +
 			"                            AND rms.RowNum = 1\n" +
-			"                        LEFT JOIN Core.dbo.AssetAttribute gseDcd ON gseDcd.Assetid = c.LoanID\n" +
-			"                            AND gseDcd.AssetAttributeTypeID = @assetAttributeTypeId_GSEDealClosingDate\n" +
+			"                        LEFT JOIN DB2.dbo.TableH attr1 ON attr1.EntityId = c.RecordID\n" +
+			"                            AND attr1.AttributeTypeID = @attributeTypeId\n" +
 			"                        OUTER APPLY\n" +
 			"        (\n" +
-			"            SELECT [POReason] = 12\n" +
+			"            SELECT [Reason1] = 12\n" +
 			"        )";
 
 		var expected =
-			"--INNER JOIN #gseLoans [l] ON l.[LoanID] = res.[LoanID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
-			"--Update the loan close reason...\n" +
+			"--INNER JOIN #TableA [l] ON l.[RecordID] = res.[RecordID]; -- join is slow (quicker to dump whole view into tempdb)\n" +
+			"--Update the closed reason...\n" +
 			"UPDATE c\n" +
 			"SET\n" +
-			"\t[c].[LoanClosedReason] = [po].[POReason]\n" +
-			"FROM #closedLoans [c]\n" +
-			"INNER JOIN #gseLoans [l] ON [l].[LoanID] = [c].[LoanID]\n" +
-			"-- changed to Miser.dbo.ASSET_DETAIL_DAILY not asset_detail (shouldn't this be as of data_date?)\n" +
-			"INNER JOIN Miser.dbo.ASSET_DETAIL_DAILY [ad] ON [ad].[LoanID] = [c].[LoanID]\n" +
+			"\t[c].[ClosedReason] = [po].[Reason1]\n" +
+			"FROM #TableB [c]\n" +
+			"INNER JOIN #TableA [l] ON [l].[RecordID] = [c].[RecordID]\n" +
+			"-- changed to DB1.dbo.TableC not ThingJustLikeTheOtherThing_detail (shouldn't this be as of data_date?)\n" +
+			"INNER JOIN DB1.dbo.TableC [ad] ON [ad].[RecordID] = [c].[RecordID]\n" +
 			"\tAND ad.DATA_DATE = @lastOfPreviousMonth\n" +
-			"INNER JOIN miser.dbo.StatusHist sh ON sh.LoanID = ad.LoanID\n" +
+			"INNER JOIN db1.dbo.TableD sh ON sh.RecordID = ad.RecordID\n" +
 			"\tAND sh.DATA_DATE = ad.DATA_DATE\n" +
-			"LEFT JOIN [Miser]..[FCMilestones] [M] ON [M].[LoanID] = [ad].[LoanID]\n" +
-			"LEFT JOIN #ResolutionsAndDispositionsBase [res] ON [res].[LoanID] = [c].[LoanID]\n" +
-			"LEFT JOIN #reomile rms ON rms.LoanId = c.LoanID\n" +
+			"LEFT JOIN [DB1]..[TableE] [M] ON [M].[RecordID] = [ad].[RecordID]\n" +
+			"LEFT JOIN #TableF [res] ON [res].[RecordID] = [c].[RecordID]\n" +
+			"LEFT JOIN #TableG rms ON rms.RecordId = c.RecordID\n" +
 			"\tAND rms.RowNum = 1\n" +
-			"LEFT JOIN Core.dbo.AssetAttribute gseDcd ON gseDcd.Assetid = c.LoanID\n" +
-			"\tAND gseDcd.AssetAttributeTypeID = @assetAttributeTypeId_GSEDealClosingDate\n" +
+			"LEFT JOIN DB2.dbo.TableH attr1 ON attr1.EntityId = c.RecordID\n" +
+			"\tAND attr1.AttributeTypeID = @attributeTypeId\n" +
 			"OUTER APPLY\n" +
 			"(\n" +
 			"\tSELECT\n" +
-			"\t\t[POReason] = 12\n" +
+			"\t\t[Reason1] = 12\n" +
 			")";
 
 		RunFactTest(sql, expected);
@@ -1523,18 +1523,62 @@ public sealed class SqlCanonicalizationServiceTests
 		// word, so the brackets alone are enough to lex it as a separate token - but there's no
 		// WhiteSpace token there for the normal whitespace-handling logic to turn into a space.
 		var sql =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON[dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON[dbo].[TestTable]\n" +
 			"INSTEAD OF UPDATE\n" +
 			"AS\n" +
 			"PRINT 1;";
 
 		var expected =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON [dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON [dbo].[TestTable]\n" +
 			"INSTEAD OF UPDATE\n" +
 			"AS\n" +
 			"PRINT 1;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void OnClauseKeepsSpaceBeforeLeftUsedAsFunctionCall()
+	{
+		// Regression test: LEFT/RIGHT/INNER/OUTER/CROSS/FULL are reserved words regardless of
+		// context, so ScriptDom hands back the same TSqlTokenType whether LEFT is a JOIN modifier
+		// or the LEFT() string function. StartsOnNewLine(Left) makes the WhiteSpace case defer to
+		// LEFT's own case for spacing (correct for the "LEFT JOIN" case, where that case starts a
+		// fresh line and indents) - but when LEFT appears as a function call mid-condition (here,
+		// right after "ON "), lineStart is already false and the non-modifier fallthrough used to
+		// call only AppendIndentIfNeeded, a no-op once already mid-line, gluing "ON" directly onto
+		// "LEFT(" with zero separator.
+		var sql =
+			"UPDATE TableA\n" +
+			"SET TableA.ModifiedDate = SYSDATETIMEOFFSET()\n" +
+			"FROM TableA (nolock)\n" +
+			"Left Outer Join TableB (nolock)\n" +
+			"On Left(TableA.Code,5) = TableB.Code\n" +
+			"Where TableA.Code Is Not Null;";
+
+		var expected =
+			"UPDATE TableA\n" +
+			"SET\n" +
+			"\tTableA.ModifiedDate = SYSDATETIMEOFFSET()\n" +
+			"FROM TableA (nolock)\n" +
+			"LEFT OUTER JOIN TableB (nolock) ON LEFT(TableA.Code, 5) = TableB.Code\n" +
+			"WHERE TableA.Code IS NOT NULL;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void FunctionCallImmediatelyInsideAnotherFunctionCallStaysGlued()
+	{
+		// Companion to OnClauseKeepsSpaceBeforeLeftUsedAsFunctionCall above: the fix there must
+		// not add a space whenever lineStart happens to be false - only when the source actually
+		// had whitespace before LEFT/RIGHT/etc. "UPPER(LEFT(..." has none (a function call's
+		// argument list always hugs the opening paren), so no space belongs there either.
+		var sql = "SELECT UPPER(LEFT(x, 3)) FROM t;";
+
+		var expected = "SELECT UPPER(LEFT(x, 3))\nFROM t;";
 
 		RunFactTest(sql, expected);
 	}
@@ -1547,8 +1591,8 @@ public sealed class SqlCanonicalizationServiceTests
 		// general keyword list - both need explicit handling, not just IsKeyword. The whole
 		// clause must land on one line regardless of how the source broke it up.
 		var sql =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON [dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON [dbo].[TestTable]\n" +
 			"instead\n" +
 			"of\n" +
 			"UPDATE\n" +
@@ -1556,8 +1600,8 @@ public sealed class SqlCanonicalizationServiceTests
 			"PRINT 1;";
 
 		var expected =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON [dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON [dbo].[TestTable]\n" +
 			"INSTEAD OF UPDATE\n" +
 			"AS\n" +
 			"PRINT 1;";
@@ -1572,8 +1616,8 @@ public sealed class SqlCanonicalizationServiceTests
 		// placement, casing, and line breaks in the source must not affect the single-line,
 		// comma-space-separated output.
 		var sql =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON [dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON [dbo].[TestTable]\n" +
 			"instead\n" +
 			"of\n" +
 			"UPDATE,\n" +
@@ -1583,8 +1627,8 @@ public sealed class SqlCanonicalizationServiceTests
 			"PRINT 1;";
 
 		var expected =
-			"CREATE OR ALTER TRIGGER [dbo].[trigtest_tr]\n" +
-			"ON [dbo].[TrigTest]\n" +
+			"CREATE OR ALTER TRIGGER [dbo].[test_trigger]\n" +
+			"ON [dbo].[TestTable]\n" +
 			"INSTEAD OF UPDATE, DELETE, INSERT\n" +
 			"AS\n" +
 			"PRINT 1;";
@@ -1595,17 +1639,17 @@ public sealed class SqlCanonicalizationServiceTests
 	[Fact]
 	public void ChainedJoinsWithBetweenClauseFormatCorrectly()
 	{
-		// Regression test for the #LoanListDataTape join chain in FullSuiteMBADelinquency.sql:
+		// Regression test for the #ItemList join chain in FullSuiteRealWorldSample.sql:
 		// every JOIN (bare or modified) starts its own line with the joined table and first ON
 		// condition kept together, and a short BETWEEN ... AND ... stays on one line rather than
 		// being split just because a JOIN clause follows it.
 		var expected = """
 			SELECT
 				*
-			FROM #LoanListDataTape ll
-			JOIN Miser.dbo.ASSET_DETAIL_DAILY ad ON ll.LoanID = ad.LoanID
+			FROM #ItemList ll
+			JOIN DB1.dbo.ThingJustLikeTheOtherThingDetailDaily ad ON ll.MasterIDNumber = ad.MasterIDNumber
 				AND ad.Data_Date BETWEEN @backTo AND @thru
-			JOIN OperationalDatamart.dbo.D_Time dt ON dt.date_id = ad.DATA_DATE
+			JOIN DB2.dbo.TimeTable dt ON dt.date_id = ad.DATA_DATE
 				AND dt.IsMonthEnd = 1;
 			""";
 
@@ -1622,16 +1666,16 @@ public sealed class SqlCanonicalizationServiceTests
 		// the measured "length" of a two-character constant enough to wrongly trigger a line
 		// break immediately before it - "79" would end up alone on its own line, indented, for
 		// no reason a reader could see.
-		var sql = "SELECT FEES_AMT = CASE WHEN (History.TransactionCode = 330 AND History.SubCode BETWEEN 66 AND 79) THEN 1 ELSE 2 END FROM History;";
+		var sql = "SELECT FEES_AMT = CASE WHEN (PastStuff.SomeCode = 330 AND PastStuff.SubCode BETWEEN 66 AND 79) THEN 1 ELSE 2 END FROM PastStuff;";
 
 		var expected =
 			"SELECT FEES_AMT =\n" +
 			"CASE\n" +
-			"\tWHEN (History.TransactionCode = 330\n" +
-			"\t\tAND History.SubCode BETWEEN 66 AND 79) THEN 1\n" +
+			"\tWHEN (PastStuff.SomeCode = 330\n" +
+			"\t\tAND PastStuff.SubCode BETWEEN 66 AND 79) THEN 1\n" +
 			"\tELSE 2\n" +
 			"END\n" +
-			"FROM History;";
+			"FROM PastStuff;";
 
 		RunFactTest(sql, expected);
 	}
@@ -1801,7 +1845,7 @@ public sealed class SqlCanonicalizationServiceTests
 		var expected = """
 			IF @intErr <> 0
 			BEGIN
-				SET @chvErrMessage = 'ERROR: Stored Procedure up_AIFu_SecondaryUpdateAssetDetail ' +
+				SET @chvErrMessage = 'ERROR: Stored Procedure usp_SampleGenericProcedureNameXX ' +
 					'failed at: Update. Correct the problem and Rerun.';
 
 				GOTO ErrorHandler;
@@ -2045,7 +2089,7 @@ public sealed class SqlCanonicalizationServiceTests
 		// (each of its internal lines is part of the token). A comment authored with trailing
 		// spaces on some lines (e.g. copy-pasted from an editor that didn't strip them) used to
 		// look like changed content and reject an otherwise-correct reformat.
-		var sql = "/*****************\n  Auth: SNSC \n  Description: foo. \n*****************/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
+		var sql = "/*****************\n  Auth: AB \n  Description: foo. \n*****************/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
 
 		var result = service.FormatForDisplayWithPositions(sql);
 
@@ -2093,12 +2137,87 @@ public sealed class SqlCanonicalizationServiceTests
 		// this specific difference (see RoundTripSafeWhenCommentLinesHaveTrailingWhitespace); now
 		// the renderer itself never produces the difference in the first place, so the comment's
 		// original trailing whitespace survives byte-for-byte.
-		var sql = "/*****\n  Auth: SNSC \n*****/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
+		var sql = "/*****\n  Auth: AB \n*****/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
 
 		var result = service.FormatForDisplayWithPositions(sql);
 
 		Assert.True(result.SafetyCheckPassed);
-		Assert.Contains("  Auth: SNSC \n", result.Text);
+		Assert.Contains("  Auth: AB \n", result.Text);
+	}
+
+	[Fact]
+	public void ExistingSemicolonAfterTrailingCommentStaysOnItsOwnLine()
+	{
+		// Regression test: the Semicolon case deliberately glues onto the preceding content (via
+		// TrimTrailingLineEndings) so e.g. a closing paren ending a subquery gets ");" instead of
+		// ")\n;" - but doing that unconditionally, when the preceding content was actually a "--"
+		// comment, put the semicolon inside the comment's own extent instead, silently commenting
+		// the terminator itself out (e.g. "--OPTION (MAXDOP 8)\n;" became "--OPTION (MAXDOP 8);").
+		var sql =
+			"CREATE OR ALTER PROCEDURE dbo.Foo\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tSELECT 1\n" +
+			"\t-- removed this hint: found it was faster without it\n" +
+			"\t--OPTION (MAXDOP 8)\n" +
+			"\t;\n" +
+			"END\n" +
+			"GO";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+		Assert.DoesNotContain("--OPTION (MAXDOP 8);", result.Text);
+	}
+
+	[Fact]
+	public void InjectedSemicolonAfterTrailingCommentStaysOnItsOwnLine()
+	{
+		// Same fix, the other call site: statementEndIndices (from ScriptDom's own
+		// TSqlStatement.LastTokenIndex) can point AT a trailing comment when no semicolon exists
+		// in the source at all - the injection path has the identical "glue via
+		// TrimTrailingLineEndings" bug for the same reason.
+		var sql =
+			"CREATE OR ALTER PROCEDURE dbo.Foo\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tSELECT 1\n" +
+			"\t-- trailing note, no semicolon in source at all\n" +
+			"END\n" +
+			"GO";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+		Assert.DoesNotContain("in source at all;", result.Text);
+	}
+
+	[Fact]
+	public void SubqueryInsideInClauseIsNotTreatedAsAValueList()
+	{
+		// Regression test: ShouldFormatInClauseMultiline/FormatInClauseMultiline are built only
+		// for a comma-separated value list ("IN (1, 2, 3)") - they don't know anything about
+		// "IN (SELECT ...)". A long/multi-line subquery (this one has embedded "--" comments,
+		// which push it well past the value-list length threshold) used to get its WHERE/FROM
+		// clauses run through the value-list splitter anyway, whenever the closing paren's own
+		// length-based check fired before the already-correct dedicated subquery handling got a
+		// chance to run - fabricating commas like "DB1..TableB c (NOLOCK)," and "WHERE,"
+		// that don't exist anywhere in the source.
+		var sql =
+			"SELECT t.SomeColumn\n" +
+			"FROM #TableA t\n" +
+			"WHERE RecordID IN (SELECT c.RecordID\n" +
+			"FROM DB1..TableB c (NOLOCK)\n" +
+			"-- JOIN DB2..TableC dc ON c.RecordID = dc.RecordID\n" +
+			"WHERE\n" +
+			"-- dc.SomeFlag = 1 and\n" +
+			"c.SomeOtherFlag = 1);";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+		Assert.DoesNotContain("(NOLOCK),", result.Text);
+		Assert.DoesNotContain("WHERE,", result.Text);
 	}
 
 	private string NormalizeWhitespace(string input)

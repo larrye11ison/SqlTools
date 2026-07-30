@@ -24,7 +24,7 @@
     <None Update="CodeSamples\FullSuiteSynthetic.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="CodeSamples\FullSuiteMBADelinquency.sql">
+    <None Update="CodeSamples\FullSuiteRealWorldSample.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="CodeSamples\SELECT.sql">
