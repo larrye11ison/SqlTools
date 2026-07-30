@@ -1974,6 +1974,49 @@ public sealed class SqlCanonicalizationServiceTests
 		Assert.False(SqlCanonicalizationService.IsRoundTripSafe(original, formatted), because);
 	}
 
+	[Fact]
+	public void RoundTripMismatchOffsetPointsAtTheActualDivergence()
+	{
+		// The whole reason to report offsets at all: a caller (ScriptDatabasesDocumentViewModel)
+		// needs to show just the relevant few lines, not a whole (possibly huge) object script -
+		// so the offset must land at the real point of divergence, not just "somewhere".
+		var original = "SELECT a FROM t WHERE x = 1";
+		var formatted = "SELECT b FROM t WHERE x = 1";
+
+		Assert.True(SqlCanonicalizationService.TryFindRoundTripMismatch(original, formatted, out var originalOffset, out var formattedOffset));
+		Assert.Equal("a", original.Substring(originalOffset, 1));
+		Assert.Equal("b", formatted.Substring(formattedOffset, 1));
+	}
+
+	[Fact]
+	public void ExtractContextSnippetReturnsOnlyNearbyLinesNotTheWholeText()
+	{
+		// This is the actual point of the snippet mechanism: a warning must show a handful of
+		// lines around the problem, not the entire (possibly hundreds-of-lines) object script.
+		var lines = Enumerable.Range(1, 200).Select(n => $"line{n}").ToArray();
+		var text = string.Join('\n', lines);
+		var offsetOfLine100 = string.Join('\n', lines[..99]).Length + 1;
+
+		var snippet = SqlCanonicalizationService.ExtractContextSnippet(text, offsetOfLine100, contextLines: 5);
+
+		Assert.Contains("line100", snippet);
+		Assert.Contains("line95", snippet);
+		Assert.Contains("line105", snippet);
+		Assert.DoesNotContain("line1\n", snippet);
+		Assert.DoesNotContain("line200", snippet);
+		Assert.True(snippet.Length < text.Length / 4, "snippet should be a small fraction of the full text");
+	}
+
+	[Fact]
+	public void ExtractContextSnippetReturnsWholeTextWhenItAlreadyFitsInTheWindow()
+	{
+		var text = "line1\nline2\nline3";
+
+		var snippet = SqlCanonicalizationService.ExtractContextSnippet(text, offset: 6, contextLines: 5);
+
+		Assert.Equal(text, snippet);
+	}
+
 	private string NormalizeWhitespace(string input)
 	{
 		// Preserve comments and original SQL structure exactly; only normalize line endings.

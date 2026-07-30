@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
@@ -60,5 +61,21 @@ public partial class ScriptDatabasesDocumentView : UserControl
 		{
 			viewModel.BaseOutputDirectory = path;
 		}
+	}
+
+	private async void OnCopyWarningsClick(object? sender, RoutedEventArgs e)
+	{
+		if (DataContext is not ScriptDatabasesDocumentViewModel viewModel)
+		{
+			return;
+		}
+
+		var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+		if (clipboard is null)
+		{
+			return;
+		}
+
+		await clipboard.SetTextAsync(viewModel.BuildWarningsReportText());
 	}
 }

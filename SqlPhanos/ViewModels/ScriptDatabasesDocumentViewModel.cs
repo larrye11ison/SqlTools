@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -79,11 +80,12 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 
 	// Per-object warnings surfaced during a run - currently just SqlCanonicalizationService's own
 	// round-trip safety check rejecting a reformatted object (see IsRoundTripSafe) and keeping
-	// that object's original, unformatted text instead. Shown in a log area on the tab itself
-	// rather than a blocking pop-over, since ScriptAsync can format hundreds of objects
-	// concurrently - a modal per object would make the run unusable.
-	[ObservableProperty]
-	private string _warningsLog = "";
+	// that object's original, unformatted text instead. Shown in a list on the tab itself rather
+	// than a blocking pop-over, since ScriptAsync can format hundreds of objects concurrently -
+	// a modal per object would make the run unusable.
+	public ObservableCollection<FormattingWarning> Warnings { get; } = new();
+
+	public bool HasWarnings => Warnings.Count > 0;
 
 	public string ConnectionDisplayName { get; }
 
@@ -108,6 +110,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		_connectionString = "";
 		ConnectionDisplayName = "";
 		Title = "Script Databases";
+		Warnings.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasWarnings));
 	}
 
 	public ScriptDatabasesDocumentViewModel(string connectionString, string connectionDisplayName)
@@ -115,6 +118,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		_connectionString = connectionString;
 		ConnectionDisplayName = connectionDisplayName;
 		Title = $"Script Databases - {connectionDisplayName}";
+		Warnings.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasWarnings));
 		_ = LoadDatabasesAsync();
 	}
 
@@ -197,7 +201,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		Status = "Starting...";
 		DurationText = "";
 		OverallProgressPercent = 0;
-		WarningsLog = "";
+		Warnings.Clear();
 
 		var started = DateTime.Now;
 		var cts = new CancellationTokenSource();
@@ -383,25 +387,44 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 	// so it matches whatever the user currently has set for paren placement, same as every
 	// other reformatting call site in this app. Objects within a database are scripted
 	// concurrently (see DatabaseScriptingService.ScriptNormalObjects), so this can be invoked
-	// from multiple worker threads at once - AppendWarning marshals onto the UI thread rather
-	// than mutating WarningsLog directly here.
+	// from multiple worker threads at once - AddWarning marshals onto the UI thread rather than
+	// mutating the Warnings collection directly here (ObservableCollection isn't thread-safe).
 	private string FormatSqlText(string sql, string databaseName, string objectName)
 	{
 		var result = _sqlCanonicalizationService.FormatForDisplayWithPositions(sql, FormattingSettingsService.OpeningParenOnNewLine);
 		if (!result.SafetyCheckPassed)
 		{
-			AppendWarning($"{databaseName}.{objectName}: formatting safety check failed - original SQL kept unchanged.");
+			AddWarning(new FormattingWarning(databaseName, objectName, result.OriginalTextSnippet ?? "", result.RejectedTextSnippet ?? ""));
 		}
 
 		return result.Text;
 	}
 
-	private void AppendWarning(string message)
+	private void AddWarning(FormattingWarning warning)
 	{
-		Dispatcher.UIThread.Post(() =>
+		Dispatcher.UIThread.Post(() => Warnings.Add(warning));
+	}
+
+	/// <summary>
+	/// Plain-text dump of every current warning, original and problematic text included in full -
+	/// meant to be pasted straight into a bug report or an AI coding assistant, not just a summary
+	/// line per object. Pure text building (no Avalonia dependency) so the actual clipboard write
+	/// stays in the view's code-behind, matching how OnBrowseClick keeps StorageProvider there.
+	/// </summary>
+	public string BuildWarningsReportText()
+	{
+		var sb = new StringBuilder();
+		foreach (var warning in Warnings)
 		{
-			WarningsLog = WarningsLog.Length == 0 ? message : WarningsLog + Environment.NewLine + message;
-		});
+			sb.Append("=== ").Append(warning.DatabaseName).Append('.').Append(warning.ObjectName).AppendLine(" ===");
+			sb.AppendLine("--- ORIGINAL ---");
+			sb.AppendLine(warning.OriginalText);
+			sb.AppendLine("--- PROBLEMATIC (REFORMATTED) ---");
+			sb.AppendLine(warning.ProblematicText);
+			sb.AppendLine();
+		}
+
+		return sb.ToString();
 	}
 
 	private async Task<ScriptDatabaseResult> ScriptOneDatabaseWithConsentAsync(

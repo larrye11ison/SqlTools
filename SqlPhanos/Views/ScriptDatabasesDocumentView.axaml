@@ -89,46 +89,95 @@
                              IsVisible="{Binding IsRunning}"/>
             </StackPanel>
 
-            <!-- Database list -->
-            <ListBox DockPanel.Dock="Top" MaxHeight="220" ItemsSource="{Binding Databases}" BorderThickness="0">
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="sdb:DatabaseListItem">
-                        <Grid ColumnDefinitions="Auto,2*,3*" Margin="0,2">
-                            <CheckBox Grid.Column="0"
-                                      IsChecked="{Binding IsSelected}"
-                                      IsEnabled="{Binding CanChangeSelection}"
-                                      VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding Name}"
-                                       VerticalAlignment="Center"
-                                       Margin="4,0"/>
-                            <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
-                                <ProgressBar Minimum="0" Maximum="100" Height="10"
-                                             Value="{Binding ProgressPercent}"
-                                             IsVisible="{Binding ShowProgressBar}"/>
-                                <TextBlock Text="{Binding ProgressStatus}"
-                                           FontSize="11"
-                                           TextTrimming="CharacterEllipsis"
-                                           IsVisible="{Binding HasProgressStatus}"/>
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+            <!-- Database list (40%) / warnings (60%) - a run that turns up a lot of formatting
+                 warnings needs the warnings pane to dominate, not the (typically short) database
+                 list. -->
+            <Grid RowDefinitions="40*,60*">
+                <!-- Database list -->
+                <ListBox Grid.Row="0" ItemsSource="{Binding Databases}" BorderThickness="0">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="sdb:DatabaseListItem">
+                            <Grid ColumnDefinitions="Auto,2*,3*" Margin="0,2">
+                                <CheckBox Grid.Column="0"
+                                          IsChecked="{Binding IsSelected}"
+                                          IsEnabled="{Binding CanChangeSelection}"
+                                          VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Name}"
+                                           VerticalAlignment="Center"
+                                           Margin="4,0"/>
+                                <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                                    <ProgressBar Minimum="0" Maximum="100" Height="10"
+                                                 Value="{Binding ProgressPercent}"
+                                                 IsVisible="{Binding ShowProgressBar}"/>
+                                    <TextBlock Text="{Binding ProgressStatus}"
+                                               FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               IsVisible="{Binding HasProgressStatus}"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
 
-            <!-- Per-object warnings log (e.g. a formatting safety-check failure) - objects can
-                 script concurrently, so this is populated live rather than only at the end,
-                 and stays a plain in-tab log rather than a pop-over since a modal per object
-                 would make a large run unusable. -->
-            <TextBlock DockPanel.Dock="Top" Text="Warnings" FontWeight="SemiBold" Margin="0,10,0,4"/>
-            <TextBox Text="{Binding WarningsLog}"
-                     IsReadOnly="True"
-                     AcceptsReturn="True"
-                     TextWrapping="NoWrap"
-                     FontFamily="Consolas,monospace"
-                     FontSize="11"
-                     ScrollViewer.VerticalScrollBarVisibility="Auto"
-                     ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                <!-- Per-object warnings (e.g. a formatting safety-check failure) - objects can
+                     script concurrently, so this is populated live rather than only at the end,
+                     and stays a plain in-tab list rather than a pop-over since a modal per object
+                     would make a large run unusable. Each entry shows the original and the
+                     formatter's rejected output side by side so the problem is visible without
+                     leaving the app, and Copy All dumps every entry in full for pasting elsewhere
+                     (e.g. into an AI coding assistant to help fix the formatter bug). -->
+                <DockPanel Grid.Row="1" Margin="0,10,0,0">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+                        <TextBlock Text="{Binding Warnings.Count, StringFormat='Warnings ({0})'}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Button Content="Copy All" Click="OnCopyWarningsClick" IsEnabled="{Binding HasWarnings}"/>
+                    </StackPanel>
+                    <ListBox ItemsSource="{Binding Warnings}" BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:FormattingWarning">
+                                <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="0,0,0,8"
+                                        Margin="0,0,0,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontWeight="SemiBold" FontSize="12">
+                                            <Run Text="{Binding DatabaseName}"/>
+                                            <Run Text="."/>
+                                            <Run Text="{Binding ObjectName}"/>
+                                        </TextBlock>
+                                        <Grid ColumnDefinitions="*,10,*">
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="Original" FontSize="10" Opacity="0.7"/>
+                                                <TextBox Text="{Binding OriginalText}"
+                                                         IsReadOnly="True"
+                                                         AcceptsReturn="True"
+                                                         TextWrapping="NoWrap"
+                                                         FontFamily="Consolas,monospace"
+                                                         FontSize="11"
+                                                         MaxHeight="180"
+                                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Spacing="2">
+                                                <TextBlock Text="Problematic (reformatted)" FontSize="10" Opacity="0.7"/>
+                                                <TextBox Text="{Binding ProblematicText}"
+                                                         IsReadOnly="True"
+                                                         AcceptsReturn="True"
+                                                         TextWrapping="NoWrap"
+                                                         FontFamily="Consolas,monospace"
+                                                         FontSize="11"
+                                                         MaxHeight="180"
+                                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Grid>
         </DockPanel>
 
         <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a

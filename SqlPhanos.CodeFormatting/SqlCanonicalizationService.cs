@@ -39,16 +39,27 @@ public sealed class SqlCanonicalizationService
 	// verifies it represents the same real SQL as the input before handing it back - see
 	// IsRoundTripSafe. On failure it returns the original text unchanged: a silent no-op is an
 	// acceptable outcome for a formatter, silently corrupting the caller's script is not.
+	// A handful of lines each side of the mismatch is enough to see the actual problem; the
+	// object script it came from can run to hundreds of lines.
+	private const int MismatchSnippetContextLines = 5;
+
 	private SqlFormatResult FormatForDisplayCore(string sql, bool openingParenOnNewLine)
 	{
 		var result = FormatForDisplayCoreUnchecked(sql, openingParenOnNewLine);
 
-		if (string.IsNullOrWhiteSpace(sql) || IsRoundTripSafe(sql, result.Text))
+		if (string.IsNullOrWhiteSpace(sql))
 		{
 			return result;
 		}
 
-		return new SqlFormatResult(sql, null, safetyCheckPassed: false);
+		if (!TryFindRoundTripMismatch(sql, result.Text, out var originalOffset, out var formattedOffset))
+		{
+			return result;
+		}
+
+		var originalSnippet = ExtractContextSnippet(sql, originalOffset, MismatchSnippetContextLines);
+		var rejectedSnippet = ExtractContextSnippet(result.Text, formattedOffset, MismatchSnippetContextLines);
+		return new SqlFormatResult(sql, null, safetyCheckPassed: false, originalTextSnippet: originalSnippet, rejectedTextSnippet: rejectedSnippet);
 	}
 
 	private SqlFormatResult FormatForDisplayCoreUnchecked(string sql, bool openingParenOnNewLine)
@@ -2033,18 +2044,29 @@ public sealed class SqlCanonicalizationService
 	// statement terminator - see the statementEndIndices handling above).
 	internal static bool IsRoundTripSafe(string originalSql, string formattedSql)
 	{
+		return !TryFindRoundTripMismatch(originalSql, formattedSql, out _, out _);
+	}
+
+	// Same check as IsRoundTripSafe, but also reports where in each text the divergence starts -
+	// used to show just the relevant few lines of "before/after" instead of a whole (possibly
+	// huge) object's entire script. Returns true when a mismatch was found (unsafe); the two
+	// offsets are only meaningful in that case.
+	internal static bool TryFindRoundTripMismatch(string originalSql, string formattedSql, out int originalMismatchOffset, out int formattedMismatchOffset)
+	{
 		var originalTokens = TryTokenize(originalSql);
 		var formattedTokens = TryTokenize(formattedSql);
 
 		if (originalTokens is null || formattedTokens is null)
 		{
-			return false;
+			originalMismatchOffset = 0;
+			formattedMismatchOffset = 0;
+			return true;
 		}
 
-		return SignificantTokenSequencesMatch(originalTokens, formattedTokens);
+		return !SignificantTokenSequencesMatch(originalTokens, formattedTokens, out originalMismatchOffset, out formattedMismatchOffset);
 	}
 
-	private static bool SignificantTokenSequencesMatch(IList<TSqlParserToken> originalTokens, IList<TSqlParserToken> formattedTokens)
+	private static bool SignificantTokenSequencesMatch(IList<TSqlParserToken> originalTokens, IList<TSqlParserToken> formattedTokens, out int originalMismatchOffset, out int formattedMismatchOffset)
 	{
 		var original = SignificantTokens(originalTokens);
 		var formatted = SignificantTokens(formattedTokens);
@@ -2080,6 +2102,8 @@ public sealed class SqlCanonicalizationService
 				continue;
 			}
 
+			originalMismatchOffset = original[i].Offset;
+			formattedMismatchOffset = formatted[j].Offset;
 			return false;
 		}
 
@@ -2088,7 +2112,66 @@ public sealed class SqlCanonicalizationService
 			j++;
 		}
 
-		return i == original.Count && j == formatted.Count;
+		if (i == original.Count && j == formatted.Count)
+		{
+			originalMismatchOffset = 0;
+			formattedMismatchOffset = 0;
+			return true;
+		}
+
+		// One side ran out of tokens before the other (extra or missing content at the end) -
+		// point at wherever the shorter side stopped, since that's where the divergence starts.
+		originalMismatchOffset = i < original.Count ? original[i].Offset : EndOffset(original);
+		formattedMismatchOffset = j < formatted.Count ? formatted[j].Offset : EndOffset(formatted);
+		return false;
+
+		static int EndOffset(List<TSqlParserToken> tokens) =>
+			tokens.Count == 0 ? 0 : tokens[^1].Offset + (tokens[^1].Text?.Length ?? 0);
+	}
+
+	// A handful of lines of context around a mismatch offset, not the whole (possibly huge)
+	// object script - the offset always falls in the middle of the window unless it's near
+	// either end of the text. Leaves "..." markers when the snippet doesn't cover the full text,
+	// so it's visually obvious this is a partial extract.
+	internal static string ExtractContextSnippet(string text, int offset, int contextLines)
+	{
+		if (string.IsNullOrEmpty(text))
+		{
+			return text ?? "";
+		}
+
+		var clampedOffset = Math.Clamp(offset, 0, text.Length);
+		var lines = text.Split('\n');
+
+		var lineIndex = 0;
+		var runningLength = 0;
+		for (var i = 0; i < lines.Length; i++)
+		{
+			runningLength += lines[i].Length + 1;
+			if (clampedOffset < runningLength)
+			{
+				lineIndex = i;
+				break;
+			}
+
+			lineIndex = i;
+		}
+
+		var start = Math.Max(0, lineIndex - contextLines);
+		var end = Math.Min(lines.Length - 1, lineIndex + contextLines);
+		var snippet = string.Join('\n', lines[start..(end + 1)]);
+
+		if (start > 0)
+		{
+			snippet = "...\n" + snippet;
+		}
+
+		if (end < lines.Length - 1)
+		{
+			snippet += "\n...";
+		}
+
+		return snippet;
 	}
 
 	private static bool IsReorderableConnector(TSqlTokenType tokenType)

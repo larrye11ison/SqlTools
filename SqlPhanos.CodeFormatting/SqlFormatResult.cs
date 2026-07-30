@@ -33,11 +33,18 @@ public readonly struct SqlTokenPosition
 /// </summary>
 public sealed class SqlFormatResult
 {
-	public SqlFormatResult(string text, IReadOnlyList<SqlTokenPosition>? tokenPositions, bool safetyCheckPassed = true)
+	public SqlFormatResult(
+		string text,
+		IReadOnlyList<SqlTokenPosition>? tokenPositions,
+		bool safetyCheckPassed = true,
+		string? originalTextSnippet = null,
+		string? rejectedTextSnippet = null)
 	{
 		Text = text;
 		TokenPositions = tokenPositions;
 		SafetyCheckPassed = safetyCheckPassed;
+		OriginalTextSnippet = originalTextSnippet;
+		RejectedTextSnippet = rejectedTextSnippet;
 	}
 
 	public string Text { get; }
@@ -57,4 +64,19 @@ public sealed class SqlFormatResult
 	/// that formatting was skipped rather than silently showing no change.
 	/// </summary>
 	public bool SafetyCheckPassed { get; }
+
+	/// <summary>
+	/// A few lines of context around the input's side of the round-trip mismatch (not the whole
+	/// object script - see SqlCanonicalizationService.ExtractContextSnippet) - null whenever
+	/// SafetyCheckPassed is true. Diagnostic/reporting only; Text is still the full, correct
+	/// original.
+	/// </summary>
+	public string? OriginalTextSnippet { get; }
+
+	/// <summary>
+	/// A few lines of context around the formatted-but-rejected output's side of the round-trip
+	/// mismatch - null whenever SafetyCheckPassed is true. Diagnostic/reporting only; this text
+	/// was never written anywhere on its own.
+	/// </summary>
+	public string? RejectedTextSnippet { get; }
 }
