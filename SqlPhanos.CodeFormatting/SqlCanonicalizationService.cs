@@ -2203,8 +2203,41 @@ public sealed class SqlCanonicalizationService
 		var comparison = RequiresCaseSensitiveRoundTripComparison(original)
 			? StringComparison.Ordinal
 			: StringComparison.OrdinalIgnoreCase;
-		return string.Equals(original.Text, formatted.Text, comparison);
+
+		var originalText = NormalizeTokenTextForComparison(original.TokenType, original.Text);
+		var formattedText = NormalizeTokenTextForComparison(formatted.TokenType, formatted.Text);
+		return string.Equals(originalText, formattedText, comparison);
 	}
+
+	// TrimTrailingWhitespaceTrackingOffsets is a blind pass over the *whole* output with no token
+	// awareness: it normalizes every line ending to Environment.NewLine (\r\n on Windows) and
+	// strips trailing whitespace from every line. Whitespace *between* tokens never sees this
+	// comparison at all (SignificantTokens excludes it), but a multi-line comment's own line
+	// breaks and any trailing spaces on its lines ARE part of its token text - so a comment
+	// authored with plain \n internally, or with trailing spaces on some lines, used to look like
+	// "changed content" here even though nothing about what the SQL means actually changed.
+	// Deliberately NOT extended to string literals: trailing whitespace inside a multi-line string
+	// constant is part of its actual value, and silently trimming that would be a real correctness
+	// bug in the formatter, not a cosmetic one - this check must keep catching that case.
+	private static string NormalizeTokenTextForComparison(TSqlTokenType tokenType, string text)
+	{
+		var normalized = NormalizeLineEndingsForComparison(text);
+
+		if (tokenType is not (TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment))
+		{
+			return normalized;
+		}
+
+		var lines = normalized.Split('\n');
+		for (var i = 0; i < lines.Length; i++)
+		{
+			lines[i] = lines[i].TrimEnd();
+		}
+
+		return string.Join('\n', lines);
+	}
+
+	private static string NormalizeLineEndingsForComparison(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
 
 	// Words T-SQL treats as keywords in specific contexts but that ScriptDom still lexes as a
 	// plain Identifier, with no TSqlTokenType of their own - see IsTryCatchFinallyToken and

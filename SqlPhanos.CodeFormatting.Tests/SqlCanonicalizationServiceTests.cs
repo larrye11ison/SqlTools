@@ -2017,6 +2017,55 @@ public sealed class SqlCanonicalizationServiceTests
 		Assert.Equal(text, snippet);
 	}
 
+	[Fact]
+	public void RoundTripSafeWhenMultilineCommentUsesPlainLfInternally()
+	{
+		// Regression test for a real false positive: TrimTrailingWhitespaceTrackingOffsets
+		// normalizes every line ending in the *output* to Environment.NewLine (\r\n on Windows).
+		// Whitespace *between* tokens is excluded from the round-trip comparison so that's
+		// invisible there, but a multi-line "/* ... */" comment's own internal line breaks are
+		// part of its token text, not separate whitespace tokens - so a comment authored with
+		// plain \n internally (as this input is, deliberately, regardless of the environment
+		// running the test) used to look like changed content and reject an otherwise-correct
+		// reformat.
+		var sql = "/*----\n     Object: Foo\n----*/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+	}
+
+	[Fact]
+	public void RoundTripSafeWhenCommentLinesHaveTrailingWhitespace()
+	{
+		// Regression test for a second real false positive found on the same object as the \n
+		// one above: TrimTrailingWhitespaceTrackingOffsets also strips trailing whitespace from
+		// every line of the *output*, which - same as the line-ending case - is invisible for
+		// whitespace *between* tokens but is a real change to a multi-line comment's own text
+		// (each of its internal lines is part of the token). A comment authored with trailing
+		// spaces on some lines (e.g. copy-pasted from an editor that didn't strip them) used to
+		// look like changed content and reject an otherwise-correct reformat.
+		var sql = "/*****************\n  Auth: SNSC \n  Description: foo. \n*****************/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+	}
+
+	[Fact]
+	public void RoundTripUnsafeWhenMultilineStringLiteralLosesTrailingWhitespace()
+	{
+		// The trailing-whitespace leniency above is deliberately NOT extended to string literals:
+		// trailing whitespace inside a multi-line string constant is part of its actual value, so
+		// losing it would be a real correctness bug in the formatter, not a cosmetic one - this
+		// must still be caught. Simulated directly (rather than relying on the renderer to ever
+		// produce this) since it exercises the comparison rule itself.
+		var withTrailingSpace = "SELECT 'line one \nline two'";
+		var withoutTrailingSpace = "SELECT 'line one\nline two'";
+
+		Assert.False(SqlCanonicalizationService.IsRoundTripSafe(withTrailingSpace, withoutTrailingSpace));
+	}
+
 	private string NormalizeWhitespace(string input)
 	{
 		// Preserve comments and original SQL structure exactly; only normalize line endings.
