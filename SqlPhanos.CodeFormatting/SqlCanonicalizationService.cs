@@ -1988,7 +1988,8 @@ public sealed class SqlCanonicalizationService
 				}
 			}
 
-			var (formattedSql, offsetMap) = TrimTrailingWhitespaceTrackingOffsets(result.ToString());
+			var rawOutput = result.ToString();
+			var (formattedSql, offsetMap) = TrimTrailingWhitespaceTrackingOffsets(rawOutput, BuildProtectedTokenMask(rawOutput));
 
 			var normalizedToOriginalOffset = BuildNormalizedToOriginalOffsetMap(sql, sqlToFormat);
 			var tokenPositions = new List<SqlTokenPosition>(tokens.Count);
@@ -2312,16 +2313,67 @@ public sealed class SqlCanonicalizationService
 		return map;
 	}
 
+	// Words T-SQL lexes as content that can legitimately contain embedded whitespace or line
+	// breaks as part of its own meaning - a comment's wording, a string literal's actual value,
+	// or (rarely, but SQL Server allows it) a bracket-quoted identifier's name. Keywords,
+	// punctuation, numbers, and unquoted identifiers can never contain a line break by
+	// construction, so they're never at risk from a text-level trim pass and don't need to be
+	// in this set.
+	private static bool IsMultilineCapableTokenType(TSqlTokenType tokenType)
+	{
+		return tokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment
+			or TSqlTokenType.AsciiStringLiteral or TSqlTokenType.UnicodeStringLiteral or TSqlTokenType.AsciiStringOrQuotedIdentifier
+			or TSqlTokenType.QuotedIdentifier or TSqlTokenType.SqlCommandIdentifier;
+	}
+
+	// Marks every character belonging to a comment/string-literal/quoted-identifier in `text` as
+	// protected, so TrimTrailingWhitespaceTrackingOffsets never mutates content that happens to
+	// contain trailing whitespace or a line break of its own. Re-tokenizes `text` itself (the
+	// near-final rendered output) with ScriptDom rather than trying to track each token's exact
+	// rendered position by hand through the ~2000-line render loop above - that kind of hand-kept
+	// offset bookkeeping has already been the source of multiple bugs elsewhere in this file
+	// (e.g. the CREATE-statement afterCreateObjectName tracking), and re-tokenizing gives
+	// ScriptDom's own authoritative offsets instead.
+	private static bool[] BuildProtectedTokenMask(string text)
+	{
+		var mask = new bool[text.Length];
+		var tokens = TryTokenize(text);
+		if (tokens is null)
+		{
+			return mask;
+		}
+
+		foreach (var token in tokens)
+		{
+			if (token.Text is null || !IsMultilineCapableTokenType(token.TokenType))
+			{
+				continue;
+			}
+
+			var start = Math.Max(0, token.Offset);
+			var end = Math.Min(text.Length, token.Offset + token.Text.Length);
+			for (var p = start; p < end; p++)
+			{
+				mask[p] = true;
+			}
+		}
+
+		return mask;
+	}
+
 	// Reimplements the trailing-whitespace cleanup FormatForDisplay has always applied (trim the
 	// very end of the document, then trim trailing whitespace from every line) but also produces
 	// a raw-offset -> final-offset map, so the token start offsets captured against the untrimmed
 	// StringBuilder during the main loop can be translated to their position in the text actually
-	// returned. Behavior must stay identical to the plain trim this replaced - only the returned
-	// offset map is new.
-	private static (string Text, int[] OffsetMap) TrimTrailingWhitespaceTrackingOffsets(string raw)
+	// returned. protectedMask (see BuildProtectedTokenMask) marks characters that belong to a
+	// comment, string literal, or quoted identifier's own text - trailing whitespace and line
+	// breaks there are part of that token's actual content, not formatting whitespace the
+	// renderer introduced between tokens, so they're copied through completely untouched instead
+	// of being trimmed or normalized to Environment.NewLine.
+	private static (string Text, int[] OffsetMap) TrimTrailingWhitespaceTrackingOffsets(string raw, bool[] protectedMask)
 	{
 		var keepLength = raw.Length;
-		while (keepLength > 0 && char.IsWhiteSpace(raw[keepLength - 1]))
+		while (keepLength > 0 && char.IsWhiteSpace(raw[keepLength - 1]) && !protectedMask[keepLength - 1])
 		{
 			keepLength--;
 		}
@@ -2336,6 +2388,23 @@ public sealed class SqlCanonicalizationService
 			var newlineIndex = raw.IndexOf('\n', rawIndex, keepLength - rawIndex);
 			var lineEndExclusive = newlineIndex >= 0 ? newlineIndex : keepLength;
 
+			if (newlineIndex >= 0 && protectedMask[newlineIndex])
+			{
+				// This line break is inside a comment/string-literal/quoted-identifier's own
+				// text, not one the renderer introduced between tokens - copy it (and whatever
+				// precedes it on this line) through byte-for-byte rather than trimming or
+				// normalizing it, so the token's actual content never changes.
+				for (var p = rawIndex; p <= newlineIndex; p++)
+				{
+					offsetMap[p] = finalPos;
+					sb.Append(raw[p]);
+					finalPos++;
+				}
+
+				rawIndex = newlineIndex + 1;
+				continue;
+			}
+
 			// A trailing '\r' is part of the "\r\n" pair, not this line's own content - it gets
 			// replaced by Environment.NewLine below rather than copied through directly.
 			var contentEnd = lineEndExclusive;
@@ -2345,7 +2414,7 @@ public sealed class SqlCanonicalizationService
 			}
 
 			var trimmedContentEnd = contentEnd;
-			while (trimmedContentEnd > rawIndex && char.IsWhiteSpace(raw[trimmedContentEnd - 1]))
+			while (trimmedContentEnd > rawIndex && char.IsWhiteSpace(raw[trimmedContentEnd - 1]) && !protectedMask[trimmedContentEnd - 1])
 			{
 				trimmedContentEnd--;
 			}

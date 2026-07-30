@@ -2058,12 +2058,47 @@ public sealed class SqlCanonicalizationServiceTests
 		// The trailing-whitespace leniency above is deliberately NOT extended to string literals:
 		// trailing whitespace inside a multi-line string constant is part of its actual value, so
 		// losing it would be a real correctness bug in the formatter, not a cosmetic one - this
-		// must still be caught. Simulated directly (rather than relying on the renderer to ever
-		// produce this) since it exercises the comparison rule itself.
+		// must still be caught. Simulated directly, exercising the comparison rule on its own -
+		// see RendererPreservesTrailingWhitespaceInsideMultilineStringLiteral below for proof the
+		// renderer itself no longer produces this in the first place.
 		var withTrailingSpace = "SELECT 'line one \nline two'";
 		var withoutTrailingSpace = "SELECT 'line one\nline two'";
 
 		Assert.False(SqlCanonicalizationService.IsRoundTripSafe(withTrailingSpace, withoutTrailingSpace));
+	}
+
+	[Fact]
+	public void RendererPreservesTrailingWhitespaceInsideMultilineStringLiteral()
+	{
+		// The actual fix: TrimTrailingWhitespaceTrackingOffsets used to be a blind pass over the
+		// whole rendered output with no token awareness, so trailing whitespace before an embedded
+		// newline inside a multi-line string literal got silently stripped - changing the
+		// literal's actual value, not just its formatting. BuildProtectedTokenMask now re-tokenizes
+		// the output and protects comment/string-literal/quoted-identifier spans from that pass
+		// entirely. Asserting the exact text (not just SafetyCheckPassed) is the point here - this
+		// proves the renderer no longer produces the bad output, rather than just proving the
+		// safety net would have caught it if it had.
+		var sql = "SELECT 'first line   \nsecond line' AS x";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+		Assert.Contains("'first line   \nsecond line'", result.Text);
+	}
+
+	[Fact]
+	public void RendererPreservesTrailingWhitespaceInsideMultilineComment()
+	{
+		// Same fix, comment case - previously handled by making the round-trip check tolerant of
+		// this specific difference (see RoundTripSafeWhenCommentLinesHaveTrailingWhitespace); now
+		// the renderer itself never produces the difference in the first place, so the comment's
+		// original trailing whitespace survives byte-for-byte.
+		var sql = "/*****\n  Auth: SNSC \n*****/\nCREATE OR ALTER PROCEDURE [dbo].[Foo]\nAS\nSELECT 1";
+
+		var result = service.FormatForDisplayWithPositions(sql);
+
+		Assert.True(result.SafetyCheckPassed);
+		Assert.Contains("  Auth: SNSC \n", result.Text);
 	}
 
 	private string NormalizeWhitespace(string input)
