@@ -3071,6 +3071,37 @@ public sealed class SqlCanonicalizationService
 				continue;
 			}
 
+			if (c == '[')
+			{
+				// A bracket-quoted identifier (e.g. a PIVOT column name) can legally contain
+				// almost any character, including a literal comma - "]]" is how T-SQL escapes a
+				// literal "]" inside one, mirroring the "''" handling for string literals just
+				// above. Without this, a comma inside the brackets looked like a value separator
+				// and split one identifier into two fabricated ones.
+				current.Append(c);
+				i++;
+				while (i < valuesPart.Length)
+				{
+					current.Append(valuesPart[i]);
+					if (valuesPart[i] == ']')
+					{
+						if (i + 1 < valuesPart.Length && valuesPart[i + 1] == ']')
+						{
+							current.Append(valuesPart[i + 1]);
+							i += 2;
+							continue;
+						}
+
+						i++;
+						break;
+					}
+
+					i++;
+				}
+
+				continue;
+			}
+
 			if (c == '(')
 			{
 				parenDepth++;

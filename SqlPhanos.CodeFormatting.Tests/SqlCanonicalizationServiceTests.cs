@@ -1398,6 +1398,38 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void BracketedInClauseValueContainingACommaIsNotSplitApart()
+	{
+		// Regression test: SplitInClauseSegments (used for both a regular WHERE ... IN (...) and
+		// a PIVOT's "FOR x IN (...)" column list, since both go through the same IN-token
+		// detection) tracked string literals and nested parens to avoid splitting on a comma
+		// inside either, but never tracked bracket-quoted identifiers - which, unlike a regular
+		// identifier, can legally contain almost any character, including a literal comma (a real
+		// PIVOT column name here). A comma inside the brackets was treated as a value separator,
+		// splitting one bracketed identifier into two fabricated ones on either side of it.
+		var sql =
+			"SELECT *\n" +
+			"FROM data\n" +
+			"PIVOT\n" +
+			"(\n" +
+			"\tMIN(Value)\n" +
+			"\tFOR TypeName IN\n" +
+			"\t(\n" +
+			"\t\t[Group A:First Category], [Group B:Second Category, With Comma Inside], [Group C:Third]\n" +
+			"\t)\n" +
+			") AS pvt;";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM data PIVOT (\n" +
+			"\tMIN(Value) FOR TypeName IN (\n" +
+			"\t\t[Group A:First Category], [Group B:Second Category, With Comma Inside], [Group C:Third])) AS pvt;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void ThenIndentsCorrectlyWhenPrecededByACommentAfterAMultilineWhen()
 	{
 		// THEN normally continues on the same line as its WHEN condition. When the WHEN
