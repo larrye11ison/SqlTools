@@ -129,6 +129,7 @@ public sealed class SqlCanonicalizationService
 			var inSubqueryInClause = false;
 			var inClauseStartIndex = -1;
 			var inClauseDepth = -1;
+			var inClauseOpenParenTokenIndex = -1;
 			var inCreateStatementParams = false;
 			var afterCreateObjectName = false;
 			var createObjectRequiresAs = true;
@@ -739,6 +740,7 @@ public sealed class SqlCanonicalizationService
 							inSubqueryInClause = false;
 							inClauseStartIndex = result.Length;
 							inClauseDepth = parenthesisDepth + 1;
+							inClauseOpenParenTokenIndex = nextInIndex;
 						}
 
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
@@ -1449,11 +1451,9 @@ public sealed class SqlCanonicalizationService
 							// "DB1..TableB c (NOLOCK)," and "WHERE," out of nowhere.
 							if (inClauseLength > 0 && !inSubqueryInClause)
 							{
-								var inClauseContent = result.ToString(inClauseStartIndex, inClauseLength);
-								if (ShouldFormatInClauseMultiline(inClauseContent, indentLevel))
+								if (ShouldFormatInClauseMultiline(inClauseLength, indentLevel))
 								{
-									result.Length = inClauseStartIndex;
-									FormatInClauseMultiline(result, inClauseContent, indentLevel);
+									FormatInClauseMultiline(result, tokens, tokenStartOffsets, inClauseStartIndex, inClauseOpenParenTokenIndex, i, indentLevel);
 									// FormatInClauseMultiline always ends by appending ")" with no
 									// trailing newline, but truncating result back to
 									// inClauseStartIndex doesn't touch this loop's own lineStart
@@ -1469,6 +1469,7 @@ public sealed class SqlCanonicalizationService
 									inInClause = false;
 									inClauseStartIndex = -1;
 									inClauseDepth = -1;
+									inClauseOpenParenTokenIndex = -1;
 									parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
 									PopParenthesisScope(parenthesisStack, parenthesisDepth + 1);
 									previousWasStatementEnd = false;
@@ -1479,6 +1480,7 @@ public sealed class SqlCanonicalizationService
 							inInClause = false;
 							inClauseStartIndex = -1;
 							inClauseDepth = -1;
+							inClauseOpenParenTokenIndex = -1;
 							if (inSubqueryInClause)
 							{
 								inSubqueryInClause = false;
@@ -2905,30 +2907,35 @@ public sealed class SqlCanonicalizationService
 		return result.ToString().TrimEnd();
 	}
 
-	private static void FormatInClauseMultiline(StringBuilder result, string inClauseContent, int indentLevel)
+	private static void FormatInClauseMultiline(StringBuilder result, IList<TSqlParserToken> tokens, int[] tokenStartOffsets, int inClauseStartIndex, int openParenTokenIndex, int closeParenTokenIndex, int indentLevel)
 	{
-		var startParen = inClauseContent.IndexOf('(');
-		if (startParen < 0)
-		{
-			result.Append(inClauseContent);
-			return;
-		}
+		// The prefix ("IN (" or, for a PIVOT column list, "FOR TypeName IN (") and each value/
+		// comment segment are read back out of "result" using offsets derived from the real
+		// token stream - never by re-scanning the already-rendered characters for punctuation.
+		// A bracket- or double-quote-quoted identifier (a PIVOT column name, say) can legally
+		// contain a literal comma or paren, and ScriptDom already knows that when it tokenized
+		// it; re-deriving comma/paren meaning from characters alone (the previous approach)
+		// could not tell a real separator from one sitting inside such an identifier's own text.
+		// All of this must run before "result" is truncated below.
+		var prefixEnd = tokenStartOffsets[openParenTokenIndex] + tokens[openParenTokenIndex].Text.Length;
+		var prefix = result.ToString(inClauseStartIndex, prefixEnd - inClauseStartIndex).Trim();
+		var segments = SplitInClauseSegments(result, tokens, tokenStartOffsets, openParenTokenIndex + 1, closeParenTokenIndex);
+
+		result.Length = inClauseStartIndex;
 
 		// indentLevel is a flat counter that does not track how deep "IN (" actually landed once
 		// CASE/WHEN, AND-continuation, and nested-parenthesis indents (each their own, separate
 		// mechanism) have all been applied to it - using it directly produced the right answer
 		// only by coincidence for a shallow, top-level IN clause, and left deeply-nested ones
 		// (e.g. inside a WHEN's boolean expression) badly under-indented. The line "IN (" is
-		// actually sitting on, read back out of result before anything more is appended to it,
-		// is the one thing that already reflects every one of those mechanisms correctly.
+		// actually sitting on, read back out of result right after truncating to
+		// inClauseStartIndex (so it reflects wherever that landed), is the one thing that
+		// already reflects every one of those mechanisms correctly.
 		var currentLineIndentTabs = GetCurrentLineText(result).TakeWhile(c => c == '\t').Count();
 
-		var prefix = inClauseContent[..(startParen + 1)].Trim();
 		result.Append(prefix);
 		result.AppendLine();
 
-		var valuesPart = inClauseContent[(startParen + 1)..].Trim().TrimEnd(')');
-		var segments = SplitInClauseSegments(valuesPart);
 		var lastValueIndex = segments.FindLastIndex(segment => !segment.IsComment);
 
 		// One tab deeper than the "IN (" line itself - the same "+1 per nesting level"
@@ -2995,141 +3002,97 @@ public sealed class SqlCanonicalizationService
 	}
 
 	/// <summary>
-	/// Splits an IN-list's inner text into value/comment segments on top-level commas only -
-	/// never inside a nested parenthesis (e.g. a function call), a string literal, or a
-	/// -- line / block comment, all of which the previous plain Split(',') would break on.
+	/// Splits an IN-list's (or a PIVOT's "FOR x IN (...)" column list's) real tokens into
+	/// value/comment segments on top-level commas only - never inside a nested parenthesis
+	/// (e.g. a function call). Boundaries are found by walking the actual token stream and
+	/// looking for real TSqlTokenType.Comma tokens, never by scanning already-rendered text for
+	/// a ',' character - a comma living inside a string literal or a bracket-/double-quote-
+	/// quoted identifier's own text is just part of that one token's Text as far as ScriptDom is
+	/// concerned, so it can never be mistaken for a separator here, regardless of what character
+	/// it is or what quoting style surrounds it.
 	/// </summary>
-	private static List<(string Text, bool IsComment)> SplitInClauseSegments(string valuesPart)
+	private static List<(string Text, bool IsComment)> SplitInClauseSegments(StringBuilder result, IList<TSqlParserToken> tokens, int[] tokenStartOffsets, int startTokenIndex, int endTokenIndexExclusive)
 	{
 		var segments = new List<(string Text, bool IsComment)>();
-		var current = new StringBuilder();
 		var parenDepth = 0;
-		var i = 0;
+		var segmentStart = startTokenIndex;
 
-		void FlushValue()
+		void FlushValue(int endExclusive)
 		{
-			var text = current.ToString().Trim();
+			var firstReal = -1;
+			var lastReal = -1;
+			for (var t = segmentStart; t < endExclusive; t++)
+			{
+				if (tokens[t].TokenType == TSqlTokenType.WhiteSpace)
+				{
+					continue;
+				}
+
+				if (firstReal < 0)
+				{
+					firstReal = t;
+				}
+
+				lastReal = t;
+			}
+
+			if (firstReal < 0)
+			{
+				return;
+			}
+
+			var startOffset = tokenStartOffsets[firstReal];
+			var endOffset = tokenStartOffsets[lastReal + 1];
+			var text = result.ToString(startOffset, endOffset - startOffset).Trim();
 			if (text.Length > 0)
 			{
 				segments.Add((text, false));
 			}
-
-			current.Clear();
 		}
 
-		while (i < valuesPart.Length)
+		for (var i = startTokenIndex; i < endTokenIndexExclusive; i++)
 		{
-			var c = valuesPart[i];
+			var tokenType = tokens[i].TokenType;
 
-			if (c == '-' && i + 1 < valuesPart.Length && valuesPart[i + 1] == '-')
+			if (tokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
 			{
-				FlushValue();
-				var end = valuesPart.IndexOf('\n', i);
-				if (end < 0)
-				{
-					end = valuesPart.Length;
-				}
-
-				segments.Add((valuesPart[i..end].TrimEnd(), true));
-				i = end;
+				// A comment always gets its own line - it must never be merged with the value
+				// before or after it, which would otherwise silently swallow a value into
+				// commented-out text.
+				FlushValue(i);
+				var start = tokenStartOffsets[i];
+				var end = tokenStartOffsets[i + 1];
+				// Trim() on both ends, not just TrimEnd(): tokenStartOffsets[i] was recorded
+				// before the comment's own case ran, which may itself prepend a newline (via
+				// AppendLineIfNeeded, when the immediately preceding WhiteSpace token deferred to
+				// this case instead of rendering its own separator) - so the captured range can
+				// start with a leading newline that isn't part of the comment's real text.
+				var commentText = result.ToString(start, end - start).Trim();
+				segments.Add((commentText, true));
+				segmentStart = i + 1;
 				continue;
 			}
 
-			if (c == '/' && i + 1 < valuesPart.Length && valuesPart[i + 1] == '*')
-			{
-				FlushValue();
-				var end = valuesPart.IndexOf("*/", i + 2, StringComparison.Ordinal);
-				end = end < 0 ? valuesPart.Length : end + 2;
-				segments.Add((valuesPart[i..end], true));
-				i = end;
-				continue;
-			}
-
-			if (c == '\'')
-			{
-				current.Append(c);
-				i++;
-				while (i < valuesPart.Length)
-				{
-					current.Append(valuesPart[i]);
-					if (valuesPart[i] == '\'')
-					{
-						if (i + 1 < valuesPart.Length && valuesPart[i + 1] == '\'')
-						{
-							current.Append(valuesPart[i + 1]);
-							i += 2;
-							continue;
-						}
-
-						i++;
-						break;
-					}
-
-					i++;
-				}
-
-				continue;
-			}
-
-			if (c == '[')
-			{
-				// A bracket-quoted identifier (e.g. a PIVOT column name) can legally contain
-				// almost any character, including a literal comma - "]]" is how T-SQL escapes a
-				// literal "]" inside one, mirroring the "''" handling for string literals just
-				// above. Without this, a comma inside the brackets looked like a value separator
-				// and split one identifier into two fabricated ones.
-				current.Append(c);
-				i++;
-				while (i < valuesPart.Length)
-				{
-					current.Append(valuesPart[i]);
-					if (valuesPart[i] == ']')
-					{
-						if (i + 1 < valuesPart.Length && valuesPart[i + 1] == ']')
-						{
-							current.Append(valuesPart[i + 1]);
-							i += 2;
-							continue;
-						}
-
-						i++;
-						break;
-					}
-
-					i++;
-				}
-
-				continue;
-			}
-
-			if (c == '(')
+			if (tokenType == TSqlTokenType.LeftParenthesis)
 			{
 				parenDepth++;
-				current.Append(c);
-				i++;
 				continue;
 			}
 
-			if (c == ')')
+			if (tokenType == TSqlTokenType.RightParenthesis)
 			{
 				parenDepth = Math.Max(0, parenDepth - 1);
-				current.Append(c);
-				i++;
 				continue;
 			}
 
-			if (c == ',' && parenDepth == 0)
+			if (tokenType == TSqlTokenType.Comma && parenDepth == 0)
 			{
-				FlushValue();
-				i++;
-				continue;
+				FlushValue(i);
+				segmentStart = i + 1;
 			}
-
-			current.Append(c);
-			i++;
 		}
 
-		FlushValue();
+		FlushValue(endTokenIndexExclusive);
 		return segments;
 	}
 
@@ -3872,10 +3835,10 @@ public sealed class SqlCanonicalizationService
 		return false;
 	}
 
-	private static bool ShouldFormatInClauseMultiline(string inClauseContent, int indentLevel)
+	private static bool ShouldFormatInClauseMultiline(int inClauseContentLength, int indentLevel)
 	{
 		var indentLength = Math.Max(0, indentLevel);
-		return indentLength + inClauseContent.Length > 120;
+		return indentLength + inClauseContentLength > 120;
 	}
 
 	private static bool ShouldKeepSelectInline(IList<TSqlParserToken> tokens, int selectIndex)
