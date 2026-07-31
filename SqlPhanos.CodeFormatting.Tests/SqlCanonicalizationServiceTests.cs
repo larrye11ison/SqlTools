@@ -1372,6 +1372,32 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void CommentBetweenInAndItsOpeningParenIsNotTornApartAsFakeValues()
+	{
+		// Regression test: inClauseStartIndex used to snapshot result.Length right at the IN
+		// token, before a comment sitting between IN and its real "(" was even rendered - so
+		// FormatInClauseMultiline's inClauseContent captured the comment's own rendered text too.
+		// Its IndexOf('(') then found the "(" INSIDE the comment (this comment's text itself looks
+		// like an old IN list) instead of the real one, and its comma-splitter tore the rest of the
+		// comment apart as if it were real values - fabricating string literal, comma, and paren
+		// tokens that were never in the source and failing the round-trip safety check outright.
+		var sql =
+			"SELECT LoanID\n" +
+			"FROM SampleTable\n" +
+			"WHERE Department  in -- ('OldGroup1', 'OldGroup2')\n" +
+			"\t\t('Group1', 'Group2', 'Group3');";
+
+		var expected =
+			"SELECT LoanID\n" +
+			"FROM SampleTable\n" +
+			"WHERE Department IN\n" +
+			"-- ('OldGroup1', 'OldGroup2')\n" +
+			"('Group1', 'Group2', 'Group3');";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void ThenIndentsCorrectlyWhenPrecededByACommentAfterAMultilineWhen()
 	{
 		// THEN normally continues on the same line as its WHEN condition. When the WHEN
@@ -1535,6 +1561,152 @@ public sealed class SqlCanonicalizationServiceTests
 			"INSTEAD OF UPDATE\n" +
 			"AS\n" +
 			"PRINT 1;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableDisableTriggerAllDoesNotCorruptLaterStatements()
+	{
+		// Regression test: TRIGGER isn't exclusive to CREATE/ALTER TRIGGER - it also appears in
+		// "ALTER TABLE ... {ENABLE|DISABLE} TRIGGER ALL/<name>", where it doesn't name a
+		// create-able object. The TRIGGER case used to unconditionally set afterCreateObjectName,
+		// which then stayed stuck true for the rest of the batch (it only clears on a matching "("
+		// or "AS") - corrupting spacing in unrelated statements far downstream. Here it glued
+		// DECLARE directly onto its @variable and TOP's row count directly onto the following
+		// @variable, in a statement with no direct connection to the ALTER TABLE line at all.
+		var sql =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"\t@fromLoanID varchar(10)\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tALTER TABLE SampleAudit disable TRIGGER ALL;\n\n" +
+			"\tdeclare @srelDate datetime;\n" +
+			"\tSELECT top 1 @srelDate = ISNULL(a.ActiveDate, '9999-12-31')\n" +
+			"\tFROM dbo.SampleTable a\n" +
+			"\tWHERE a.StatusID = 58\n" +
+			"END";
+
+		var expected =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"\t@fromLoanID varchar(10)\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tALTER TABLE SampleAudit disable TRIGGER ALL;\n\n" +
+			"\tDECLARE @srelDate datetime;\n\n" +
+			"\tSELECT\n" +
+			"\t\tTOP 1 @srelDate = ISNULL(a.ActiveDate, '9999-12-31')\n" +
+			"\tFROM dbo.SampleTable a\n" +
+			"\tWHERE a.StatusID = 58;\n\n" +
+			"END;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void MultiStatementTvfReturnsTableClauseFormatsLikeCreateTable()
+	{
+		// Regression test: RETURNS has no TSqlTokenType of its own (lexed as a plain Identifier,
+		// like TRY/CATCH/INSTEAD elsewhere in this file) and TABLE in "RETURNS @var TABLE (...)"
+		// reuses the same Table token type as CREATE TABLE. With no dedicated handling, RETURNS
+		// fell through to the generic identifier path and inherited the real parameter list's
+		// still-true (deliberately, for AS's sake) inCreateStatementParams flag as if it were a
+		// continuation of that list - over-indenting RETURNS one level and, since "@" is a valid
+		// non-leading identifier character in T-SQL, gluing "RETURNS" directly onto "@RETVAL"
+		// with zero separator merged them into a single token, changing the significant token
+		// sequence and failing the round-trip safety check outright (not just a display quirk).
+		var sql =
+			"CREATE OR ALTER FUNCTION [dbo].[udt_SampleAssetStatuses](\n" +
+			"\t@dtTargetDate  datetime\n" +
+			")\n" +
+			"RETURNS  \t@RETVAL TABLE\n" +
+			"\t( \t[ASSET_ID] [int] NOT NULL\n" +
+			"\t\t,[STATUS_ID] [integer] NOT NULL\n" +
+			"\t)\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tINSERT @RETVAL\n" +
+			"\tSELECT ASSET_ID, STATUS_ID\n" +
+			"\tFROM SampleAssetTable\n" +
+			"\tWHERE TargetDate = @dtTargetDate;\n" +
+			"\tRETURN;\n" +
+			"END";
+
+		var expected =
+			"CREATE OR ALTER FUNCTION [dbo].[udt_SampleAssetStatuses](\n" +
+			"\t@dtTargetDate datetime\n" +
+			")\n" +
+			"RETURNS @RETVAL TABLE (\n" +
+			"\t[ASSET_ID] [int] NOT NULL,\n" +
+			"\t[STATUS_ID] [integer] NOT NULL\n" +
+			")\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tINSERT @RETVAL\n" +
+			"\tSELECT\n" +
+			"\t\tASSET_ID,\n" +
+			"\t\tSTATUS_ID\n" +
+			"\tFROM SampleAssetTable\n" +
+			"\tWHERE TargetDate = @dtTargetDate;\n\n" +
+			"\tRETURN;\n\n" +
+			"END;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void DeclareTableVariableColumnListFormatsLikeCreateTable()
+	{
+		// Companion to MultiStatementTvfReturnsTableClauseFormatsLikeCreateTable: a local
+		// "DECLARE @x TABLE (...)" variable also has "@x" immediately before the Table token, so
+		// the fix that recognizes "RETURNS @var TABLE (...)" must not be specific to RETURNS -
+		// it needs to key off the preceding Variable token generally.
+		var sql =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tDECLARE @MyTableVar TABLE (Col1 int, Col2 varchar(10));\n" +
+			"\tINSERT @MyTableVar SELECT 1, 'x';\n" +
+			"END";
+
+		var expected =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tDECLARE @MyTableVar TABLE (\n" +
+			"\t\tCol1 int,\n" +
+			"\t\tCol2 varchar(10)\n" +
+			"\t);\n\n" +
+			"\tINSERT @MyTableVar\n" +
+			"\tSELECT\n" +
+			"\t\t1,\n" +
+			"\t\t'x';\n\n" +
+			"END;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void EmptyCreateObjectParameterListStaysOnOneLine()
+	{
+		// Regression test: a zero-parameter CREATE FUNCTION/PROC's "()" used to always get split
+		// onto two lines ("(\n)") because the opening paren's afterCreateObjectName handling
+		// unconditionally appended a newline after "(", with no check for whether there was
+		// actually anything to list before the matching ")".
+		var sql =
+			"CREATE FUNCTION dbo.fSampleFunc ()\n" +
+			"RETURNS int\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tRETURN 1;\n" +
+			"END";
+
+		var expected =
+			"CREATE FUNCTION dbo.fSampleFunc ()\n" +
+			"RETURNS int AS\n" +
+			"BEGIN\n" +
+			"\tRETURN 1;\n\n" +
+			"END;";
 
 		RunFactTest(sql, expected);
 	}

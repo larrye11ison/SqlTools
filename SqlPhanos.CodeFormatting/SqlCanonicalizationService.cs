@@ -365,11 +365,29 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.Procedure:
 					case TSqlTokenType.Function:
 					case TSqlTokenType.View:
-					case TSqlTokenType.Trigger:
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						afterCreateObjectName = true;
 						createObjectRequiresAs = true;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Trigger:
+						// Unlike PROC/FUNCTION/VIEW, TRIGGER isn't exclusive to CREATE/ALTER
+						// TRIGGER - it also appears in "ALTER TABLE ... {ENABLE|DISABLE} TRIGGER
+						// ALL/<name>", where it doesn't name a create-able object at all. Setting
+						// afterCreateObjectName there was leaving that flag stuck true for the
+						// rest of the batch (it only clears on a matching "(" or "AS"), corrupting
+						// unrelated statements far downstream.
+						var previousTriggerIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
+						var previousTriggerType = previousTriggerIndex >= 0 ? tokens[previousTriggerIndex].TokenType : TSqlTokenType.None;
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						if (previousTriggerType is TSqlTokenType.Create or TSqlTokenType.Alter)
+						{
+							afterCreateObjectName = true;
+							createObjectRequiresAs = true;
+						}
 						previousWasStatementEnd = false;
 						break;
 
@@ -382,6 +400,18 @@ public sealed class SqlCanonicalizationService
 						{
 							afterCreateObjectName = true;
 							createObjectRequiresAs = false;
+						}
+						else if (previousTableType == TSqlTokenType.Variable)
+						{
+							// "@var TABLE (...)" - a multi-statement TVF's RETURNS clause, or a
+							// local table variable DECLARE. Reuse the same afterCreateObjectName
+							// machinery CREATE TABLE uses just below, so this column list gets the
+							// same one-column-per-line formatting instead of falling through to the
+							// generic (and here, glued-with-no-space) parenthesis handling.
+							// createObjectRequiresAs is deliberately left untouched - RETURNS still
+							// needs AS afterward, but a bare DECLARE @x TABLE (...) never set it, so
+							// leaving it alone does the right thing for both.
+							afterCreateObjectName = true;
 						}
 						previousWasStatementEnd = false;
 						break;
@@ -692,7 +722,18 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.In:
 						var nextInIndex = NextNonWhitespaceIndex(tokens, i + 1);
-						if (nextInIndex < tokens.Count && tokens[nextInIndex].TokenType == TSqlTokenType.LeftParenthesis)
+						// A comment between IN and its "(" (e.g. "IN -- (old list)\n(new list)")
+						// must not activate the multiline value-list path below: inClauseStartIndex
+						// snapshots result.Length right here, before the comment is even rendered,
+						// so FormatInClauseMultiline would later capture the comment's own text
+						// inside inClauseContent too. Its IndexOf('(') then finds the "(" INSIDE the
+						// comment instead of the real one, and its comma-splitter tears the rest of
+						// the comment's text apart as if it were real values - fabricating string
+						// literal and paren tokens that were never in the source. Falling through to
+						// the generic per-token renderer instead can't fabricate anything - it just
+						// prints the comment and the real list as whatever tokens they actually are.
+						if (nextInIndex < tokens.Count && tokens[nextInIndex].TokenType == TSqlTokenType.LeftParenthesis &&
+							!ContainsCommentToken(tokens, i + 1, nextInIndex))
 						{
 							inInClause = true;
 							inSubqueryInClause = false;
@@ -1181,6 +1222,26 @@ public sealed class SqlCanonicalizationService
 						if (afterCreateObjectName)
 						{
 							inCreateStatementParams = true;
+							afterCreateObjectName = false;
+
+							var nextParamListIndex = NextNonWhitespaceIndex(tokens, i + 1);
+							var isEmptyParameterList = nextParamListIndex < tokens.Count && tokens[nextParamListIndex].TokenType == TSqlTokenType.RightParenthesis;
+							if (isEmptyParameterList)
+							{
+								// A zero-parameter CREATE PROC/FUNCTION/etc doesn't need its own
+								// entry line - leaving inCreateObjectParameterList unset here means
+								// the matching ")" (nothing else can appear at this depth before it)
+								// falls through to the generic RightParenthesis handling instead of
+								// the inCreateObjectParameterList branch below, which would otherwise
+								// force it onto its own line too, splitting "()" into "(\n)" for no
+								// reason. inCreateStatementParams stays true above so RETURNS/AS
+								// right after the ")" still get their normal CREATE-context handling.
+								AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+								result.Append(token.Text);
+								previousWasStatementEnd = false;
+								break;
+							}
+
 							inCreateObjectParameterList = true;
 							createObjectParameterListDepth = parenthesisDepth;
 							if (openingParenOnNewLine && !lineStart)
@@ -1192,7 +1253,6 @@ public sealed class SqlCanonicalizationService
 							result.Append(token.Text);
 							result.AppendLine();
 							lineStart = true;
-							afterCreateObjectName = false;
 							previousWasStatementEnd = false;
 							break;
 						}
@@ -1682,7 +1742,12 @@ public sealed class SqlCanonicalizationService
 								var glueBeforeParameterList = !openingParenOnNewLine && nextCreateType == TSqlTokenType.LeftParenthesis;
 								if (glueAfterCreateKeyword || glueBeforeParameterList)
 								{
-									result.Append(' ');
+									// A source whitespace run spanning a newline (e.g. "TABLE\n\t(")
+									// isn't always one WhiteSpace token - ScriptDom can hand back a
+									// separate token per line ('\n' then '\t') - so this branch can run
+									// twice for what's logically a single gap. AppendSpaceIfNeeded (not
+									// a bare Append(' ')) keeps the second run from adding a second space.
+									AppendSpaceIfNeeded(result, lineStart);
 								}
 								else
 								{
@@ -1882,6 +1947,26 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
+						if (inCreateStatementParams && !afterCreateObjectName && token.Text.Equals("RETURNS", StringComparison.OrdinalIgnoreCase))
+						{
+							// A multi-statement TVF's "RETURNS @var TABLE (...)" clause. RETURNS has
+							// no TSqlTokenType of its own (lexed as a plain Identifier, like
+							// TRY/CATCH/INSTEAD elsewhere in this file) and inCreateStatementParams
+							// is still true here - left over from the real parameter list on
+							// purpose, so AS still gets CREATE-context indentation once it arrives -
+							// but RETURNS itself is a sibling clause of CREATE FUNCTION, not a
+							// continuation of the parameter list, so it must not inherit the
+							// parameter list's extra indent level (or the stale flag, which would
+							// otherwise make the '(' of "TABLE (" below think it's still inside that
+							// same parameter list and suppress its own spacing).
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append(token.Text);
+							inCreateStatementParams = false;
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						if (afterCreateObjectName && !token.Text.StartsWith("@", StringComparison.Ordinal))
 						{
 							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
@@ -1945,6 +2030,20 @@ public sealed class SqlCanonicalizationService
 								}
 								AppendIndent(result, parameterIndent);
 								lineStart = false;
+							}
+							else if (i > 0 && tokens[i - 1].TokenType == TSqlTokenType.WhiteSpace)
+							{
+								// Mid-line here means this '@' token isn't a fresh parameter-list
+								// entry (those always reach this branch with lineStart true, via the
+								// parameter-list comma/opening-paren logic above forcing a newline
+								// first) - it's a variable reference elsewhere, e.g. a TVF's "RETURNS
+								// @var TABLE (...)" clause, where inCreateStatementParams is still
+								// true left over from the real parameter list (deliberately, so the
+								// AS-indent logic still applies through RETURNS) but there's no comma
+								// or paren here to have already supplied a separator. Only add the
+								// space when the source actually had one - a function call's argument
+								// list (e.g. "COALESCE(@x, ...)") must keep hugging its opening paren.
+								AppendSpaceIfNeeded(result, lineStart);
 							}
 							result.Append(token.Text);
 							previousWasStatementEnd = false;
@@ -3597,6 +3696,19 @@ public sealed class SqlCanonicalizationService
 		}
 
 		for (var i = 0; i < tokens.Count; i++)
+		{
+			if (tokens[i].TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool ContainsCommentToken(IList<TSqlParserToken> tokens, int startIndex, int endIndexExclusive)
+	{
+		for (var i = startIndex; i < endIndexExclusive && i < tokens.Count; i++)
 		{
 			if (tokens[i].TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
 			{
