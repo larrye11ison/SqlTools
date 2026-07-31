@@ -1398,6 +1398,59 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void LeadingCommaSeparatedFromValueByMultipleCommentsSkipsMultilineFormatting()
+	{
+		// Regression test: the round-trip check's own tolerance (see the IsReorderableConnector
+		// branch in SignificantTokenSequencesMatch) only accepts moving a comma past exactly one
+		// adjacent comment - the normal amount of reordering FormatInClauseMultiline's
+		// leading-comma-to-trailing-comma normalization produces. This value list deliberately
+		// keeps each removed candidate value grouped with the comment(s) explaining why it was
+		// removed, so the real comma for the next value arrives after several comment-only
+		// lines - moving it up next to the previous value would require reordering past more
+		// comments than that tolerance covers, and previously failed the round-trip check
+		// outright (SafetyCheckPassed = false, whole object fell back to unformatted text).
+		// HasCommentBetweenValueAndItsComma now detects this shape up front and skips the
+		// special-cased multiline renderer for just this clause, falling through to the generic
+		// per-token path, which preserves the source's own leading-comma layout and can't reorder
+		// anything - safe, if less polished, output instead of no formatting at all.
+		var sql =
+			"SELECT LoanID\n" +
+			"FROM SampleTable\n" +
+			"WHERE CATEGORY_TYPE_ID IN\n" +
+			"(\n" +
+			"\t-- ** The last two are the only ones they want, although the others were requested\n" +
+			"\t-- ** at various times.\n" +
+			"\t11\t  -- BANKRUPTCY  PAYMENT (readded TASC105548)\n" +
+			"\t--113\tBANKRUPTCY\n" +
+			"\t--1945\tBankruptcy Reconciliation\n" +
+			"\t--1988\tBK Proof of Claim\n" +
+			"\t--\n" +
+			"\t, 1988 -- bk proof of claim\n" +
+			"\t, 1945 -- BK Recon\n" +
+			"\t);";
+
+		var expected =
+			"SELECT LoanID\n" +
+			"FROM SampleTable\n" +
+			"WHERE CATEGORY_TYPE_ID IN (\n" +
+			"\t-- ** The last two are the only ones they want, although the others were requested\n" +
+			"\t-- ** at various times.\n" +
+			"\t11\n" +
+			"\t-- BANKRUPTCY  PAYMENT (readded TASC105548)\n" +
+			"\t--113\tBANKRUPTCY\n" +
+			"\t--1945\tBankruptcy Reconciliation\n" +
+			"\t--1988\tBK Proof of Claim\n" +
+			"\t--\n" +
+			"\t, 1988\n" +
+			"\t-- bk proof of claim\n" +
+			"\t, 1945\n" +
+			"\t-- BK Recon\n" +
+			");";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void BracketedInClauseValueContainingACommaIsNotSplitApart()
 	{
 		// Regression test: SplitInClauseSegments (used for both a regular WHERE ... IN (...) and

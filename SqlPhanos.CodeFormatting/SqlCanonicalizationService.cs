@@ -1449,7 +1449,7 @@ public sealed class SqlCanonicalizationService
 							// through the value-list splitter - which inserts a trailing comma
 							// after every "value" it finds, fabricating commas like
 							// "DB1..TableB c (NOLOCK)," and "WHERE," out of nowhere.
-							if (inClauseLength > 0 && !inSubqueryInClause)
+							if (inClauseLength > 0 && !inSubqueryInClause && !HasCommentBetweenValueAndItsComma(tokens, inClauseOpenParenTokenIndex + 1, i))
 							{
 								if (ShouldFormatInClauseMultiline(inClauseLength, indentLevel))
 								{
@@ -3715,6 +3715,62 @@ public sealed class SqlCanonicalizationService
 			{
 				return true;
 			}
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// True when a value-list IN clause's real comma stream doesn't sit close enough to its value
+	/// for the round-trip check's existing tolerance to accept moving it there. That check (see
+	/// the IsReorderableConnector branch in SignificantTokenSequencesMatch) already tolerates
+	/// exactly one adjacent comment/comma transposition - a single "value -- comment\n, next"
+	/// swapping to "value,\n-- comment\nnext" is expected and fine, since FormatInClauseMultiline
+	/// always normalizes to trailing-comma style. But a "leading comma" style deliberately used to
+	/// keep a removed candidate value and the comment(s) explaining why it was removed grouped
+	/// together, with the real comma for the *next* value arriving only after two or more such
+	/// comment-only lines, needs the comma to move past more than one comment - more reordering
+	/// than that one-swap tolerance covers, so the round-trip check correctly rejects it. Callers
+	/// use this to skip the special-cased renderer entirely for a clause shaped that way, falling
+	/// through to the generic per-token path instead, which preserves every token's real relative
+	/// order (including comments) and can't reorder anything, matching what the check allows.
+	/// </summary>
+	private static bool HasCommentBetweenValueAndItsComma(IList<TSqlParserToken> tokens, int startIndex, int endIndexExclusive)
+	{
+		var depth = 0;
+		var precedingCommentRunLength = 0;
+
+		for (var i = startIndex; i < endIndexExclusive && i < tokens.Count; i++)
+		{
+			var tokenType = tokens[i].TokenType;
+
+			if (tokenType == TSqlTokenType.WhiteSpace)
+			{
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.LeftParenthesis)
+			{
+				depth++;
+				precedingCommentRunLength = 0;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.RightParenthesis)
+			{
+				depth = Math.Max(0, depth - 1);
+				precedingCommentRunLength = 0;
+				continue;
+			}
+
+			if (tokenType == TSqlTokenType.Comma && depth == 0 && precedingCommentRunLength > 1)
+			{
+				return true;
+			}
+
+			precedingCommentRunLength = tokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment
+				? precedingCommentRunLength + 1
+				: 0;
 		}
 
 		return false;
