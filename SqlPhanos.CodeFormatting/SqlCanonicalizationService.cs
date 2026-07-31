@@ -781,12 +781,14 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.Cross:
 					case TSqlTokenType.Full:
 						var nextJoinIndex = NextNonWhitespaceIndex(tokens, i + 1);
+						var isApplyModifier = nextJoinIndex < tokens.Count &&
+							tokens[nextJoinIndex].TokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier &&
+							tokens[nextJoinIndex].Text.Equals("APPLY", StringComparison.OrdinalIgnoreCase);
 						var isJoinModifier = nextJoinIndex < tokens.Count &&
 							(tokens[nextJoinIndex].TokenType == TSqlTokenType.Join ||
 							 tokens[nextJoinIndex].TokenType == TSqlTokenType.Outer ||
 							 tokens[nextJoinIndex].TokenType == TSqlTokenType.Inner ||
-							 tokens[nextJoinIndex].TokenType is TSqlTokenType.Identifier or TSqlTokenType.QuotedIdentifier &&
-								 tokens[nextJoinIndex].Text.Equals("APPLY", StringComparison.OrdinalIgnoreCase));
+							 isApplyModifier);
 						var joinIndent = indentLevel + GetActiveExpandedParenthesisDepth(parenthesisStack);
 
 						if (isJoinModifier)
@@ -809,9 +811,14 @@ public sealed class SqlCanonicalizationService
 							}
 							else
 							{
-								// CROSS is the only modifier here that can never be followed by an
-								// ON clause (CROSS JOIN / CROSS APPLY both lack one).
-								var crossJoinIndent = BeginJoinClause(expectsOnClause: token.TokenType != TSqlTokenType.Cross);
+								// CROSS JOIN/CROSS APPLY and OUTER APPLY are the modifiers here that
+								// can never be followed by an ON clause - only OUTER JOIN has one.
+								// Passing expectsOnClause: true for OUTER APPLY (as if it were OUTER
+								// JOIN) pushed a join frame here that no ON ever came along to pop -
+								// BeginJoinClause's frame stack stayed permanently one deeper for the
+								// rest of the batch, inflating every later JOIN's indent by a level
+								// that never unwound, however unrelated that later statement was.
+								var crossJoinIndent = BeginJoinClause(expectsOnClause: token.TokenType != TSqlTokenType.Cross && !isApplyModifier);
 								AppendLineIfNeeded(result, ref lineStart);
 								AppendIndentIfNeeded(result, crossJoinIndent, ref lineStart);
 							}

@@ -1712,6 +1712,61 @@ public sealed class SqlCanonicalizationServiceTests
 	}
 
 	[Fact]
+	public void OuterApplyDoesNotLeakStuckIndentIntoLaterStatements()
+	{
+		// Regression test: CROSS JOIN/CROSS APPLY and OUTER APPLY are the only JOIN-modifier
+		// shapes that are never followed by an ON clause - only OUTER JOIN has one. The
+		// OUTER-modifier branch passed expectsOnClause: true for OUTER APPLY too (as if it were
+		// OUTER JOIN), which pushes a join frame - normally popped when its ON is seen. Since
+		// OUTER APPLY has no ON, that frame was never popped: BeginJoinClause's frame stack (and
+		// therefore every later JOIN's indent, since it factors in how many frames are still
+		// open) stayed one level deeper than it should for the rest of the batch, well past the
+		// statement the OUTER APPLY was even in.
+		var sql =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tSELECT ad.LoanID\n" +
+			"\tFROM TableA ad\n" +
+			"\tOUTER APPLY\n" +
+			"\t(\n" +
+			"\t\tSELECT 1 AS X\n" +
+			"\t) dataChk;\n\n" +
+			"\tUPDATE c\n" +
+			"\tSET c.Col1 = po.Col2\n" +
+			"\tFROM TableB c\n" +
+			"\t\t\tINNER JOIN TableC l ON l.LoanID = c.LoanID\n" +
+			"\t\t\tOUTER APPLY\n" +
+			"\t(\n" +
+			"\t\tSELECT 1 AS Col2\n" +
+			"\t) AS po;\n" +
+			"END";
+
+		var expected =
+			"CREATE OR ALTER PROCEDURE dbo.usp_SampleProc\n" +
+			"AS\n" +
+			"BEGIN\n" +
+			"\tSELECT ad.LoanID\n" +
+			"\tFROM TableA ad\n" +
+			"\tOUTER APPLY\n" +
+			"\t(\n" +
+			"\t\tSELECT 1 AS X\n" +
+			"\t) dataChk;\n\n" +
+			"\tUPDATE c\n" +
+			"\tSET\n" +
+			"\t\tc.Col1 = po.Col2\n" +
+			"\tFROM TableB c\n" +
+			"\tINNER JOIN TableC l ON l.LoanID = c.LoanID\n" +
+			"\tOUTER APPLY\n" +
+			"\t(\n" +
+			"\t\tSELECT 1 AS Col2\n" +
+			"\t) AS po;\n\n" +
+			"END;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
 	public void OnClauseKeepsSpaceBeforeLeftUsedAsFunctionCall()
 	{
 		// Regression test: LEFT/RIGHT/INNER/OUTER/CROSS/FULL are reserved words regardless of
