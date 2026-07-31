@@ -1402,11 +1402,14 @@ public sealed class SqlCanonicalizationServiceTests
 	{
 		// Regression test: SplitInClauseSegments (used for both a regular WHERE ... IN (...) and
 		// a PIVOT's "FOR x IN (...)" column list, since both go through the same IN-token
-		// detection) tracked string literals and nested parens to avoid splitting on a comma
-		// inside either, but never tracked bracket-quoted identifiers - which, unlike a regular
-		// identifier, can legally contain almost any character, including a literal comma (a real
-		// PIVOT column name here). A comma inside the brackets was treated as a value separator,
-		// splitting one bracketed identifier into two fabricated ones on either side of it.
+		// detection) originally re-scanned already-rendered text character by character, tracking
+		// string literals and nested parens to avoid splitting on a comma inside either - but not
+		// bracket-quoted identifiers, which, unlike a regular identifier, can legally contain
+		// almost any character, including a literal comma (a real PIVOT column name here). It has
+		// since been rewritten to split on the real token stream's TSqlTokenType.Comma tokens
+		// instead (see SplitInClauseSegments), which sidesteps this whole class of bug - a comma
+		// inside a QuotedIdentifier or StringLiteral token's own Text was never a separate Comma
+		// token to begin with, regardless of what quoting character surrounds it.
 		var sql =
 			"SELECT *\n" +
 			"FROM data\n" +
@@ -1425,6 +1428,38 @@ public sealed class SqlCanonicalizationServiceTests
 			"FROM data PIVOT (\n" +
 			"\tMIN(Value) FOR TypeName IN (\n" +
 			"\t\t[Group A:First Category], [Group B:Second Category, With Comma Inside], [Group C:Third])) AS pvt;";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void DoubleQuotedInClauseValueContainingACommaIsNotSplitApart()
+	{
+		// Companion to BracketedInClauseValueContainingACommaIsNotSplitApart: under
+		// QUOTED_IDENTIFIER ON (which both real objects this was found against explicitly set),
+		// a double-quoted identifier is just as legal a PIVOT column name as a bracketed one, and
+		// can just as legally contain a literal comma. The old text-scanning splitter tracked
+		// '\'' string literals and (after the bracket fix) '[' identifiers but never '"' -
+		// splitting this the same way brackets used to. The token-based rewrite fixes this too,
+		// for free, since it never inspects a QuotedIdentifier token's characters at all.
+		var sql =
+			"SELECT *\n" +
+			"FROM data\n" +
+			"PIVOT\n" +
+			"(\n" +
+			"\tMIN(Value)\n" +
+			"\tFOR TypeName IN\n" +
+			"\t(\n" +
+			"\t\t\"Group A:First Category\", \"Group B:Second Category, With Comma Inside\", \"Group C:Third\"\n" +
+			"\t)\n" +
+			") AS pvt;";
+
+		var expected =
+			"SELECT\n" +
+			"\t*\n" +
+			"FROM data PIVOT (\n" +
+			"\tMIN(Value) FOR TypeName IN (\n" +
+			"\t\t\"Group A:First Category\", \"Group B:Second Category, With Comma Inside\", \"Group C:Third\")) AS pvt;";
 
 		RunFactTest(sql, expected);
 	}
