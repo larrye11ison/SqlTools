@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- WinExe rather than Exe - this launches detached from SqlPhanos with no console attached,
-         and a plain console OutputType briefly flashes an empty console window on start. -->
-    <OutputType>WinExe</OutputType>
+    <!-- Exe (not WinExe) so the console window is visible - see Program.cs's doc comment for why:
+         updates were failing to relaunch with zero UI and zero logging, leaving no way to tell
+         what happened. A brief progress console is the intended UX here, not a flash to avoid. -->
+    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <AssemblyName>SqlPhanos.Updater</AssemblyName>
