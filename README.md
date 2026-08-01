@@ -1,94 +1,83 @@
-# SqlTools
+# SqlPhanos
 
-An application written in .net 8 and WPF for searching and browsing object scripts on Microsoft SQL Servers.
+*(formerly SqlTools)*
 
-SqlTools can search by any or all of the following:
+A Windows desktop app (built on Avalonia UI, .NET 10) for searching, browsing, scripting, and bulk-exporting objects on Microsoft SQL Servers — plus a built-in ad-hoc query tool that exports results straight to Excel.
 
-* Object Name
-* Schema Name
-* Object Definition - you can search *inside* the text of the objects' definitions
+SqlPhanos started as a focused "find the object I'm looking for" tool. It's grown into a much broader SQL Server workbench: live object scripting with dependent-object discovery, encrypted-object decryption, CLR object decompilation, whole-database bulk export with delta detection, and query-to-Excel export — all built around a ScriptDom-based SQL formatter with a round-trip safety net that refuses to hand you corrupted output.
 
-After a search is complete, you can further filter (case-insensitive) within the search results:
+<!-- SCREENSHOT: Main window — connection panel + search results grid + an open script tab, showing the overall layout -->
 
- * Simply type one or more "filter tokens" - words or parts of words separated by text - into the Filter box.
- * A logical AND operation will always be applied to all filter tokens
- * Or you can also target filter tokens to specific fields within the results grid, ex.:
-   * name:jason | filters the results to items where the Name column contains "jason"
-   * type:stor | filters the results to items where the Type column contains "stor"
-   * db:foo | filters the results to items where the Database column contains "foo"
-   * There are at least 1 or 2 others that I cannot remember right now
-   * Filter tokens can be negated with "^", e.g. "db:^xyz" will exclude any database whose name contains "xyz."
+## Why does this exist?
 
-## Can you show me what it looks like?
+In day-to-day prod support work across servers with dozens of databases and thousands of objects, the recurring need was: find a stored proc/view/table by name (often without remembering its full name *or* which database it's in), see its definition, and understand what's around it — without hand-writing the same `sys.objects` query for the hundredth time, and without the search UI in SQL Server Management Studio getting in the way.
 
-Yes.
+SqlPhanos does that search across every database on a server at once, then keeps growing to cover the other things that search usually leads to next: scripting the object out, checking what depends on it, exporting a whole database's worth of objects for a diff or a rebuild, and running an ad-hoc query without leaving the app.
 
-This is the interface for locating objects by searching on the SQL Server:
+## Features
 
-![Code View Interface](/Wiki/Images/SqlToolsSearchInterface.png)
+### Search
 
-Clicking the "Script" button obtains the SQL object definition for that object and then displays it to you in this interface:
+* Search by Object Name, Schema Name, and/or Object Definition (matches inside object bodies, including column names).
+* Searches **every user database on the server concurrently**, with per-database failure isolation — one bad database doesn't abort the rest of the search.
+* Finds tables, views, stored procedures, scalar/table-valued/inline table-valued functions, triggers, sequences, user-defined table types, CLR-backed equivalents of the above, and more (constraints, rules, synonyms, service broker queues, plan guides).
+* Client-side filtering on top of results: a general filter box plus dedicated Name/Schema/DB/Type filter boxes, with `!` to negate a term.
+* Two results views — a card list or a full sortable/resizable data grid — toggle with `Ctrl+R`.
 
-![Code View Interface](/Wiki/Images/SqlToolsCodeViewInterface.png)
+<!-- SCREENSHOT: Search panel with a set of results in the data grid view, filter boxes visible -->
 
-## Why do we need yet another way to view and script objects on MSSQL?
+### Script viewing
 
-In my daily job I do a lot of prod support work on servers containing dozens of databases, 
-many of which have several thousand objects. I constantly need to find stored procs, views, 
-etc. by name, but most of the time I don't remember the FULL name of the object I'm looking 
-for. To make matters worse, a lot of times I don't even remember which *database* it's in.
+* Click "Script" to script an object live from the server into its own tab, with cancel support and a refresh button.
+* Toggle between the server's **Original** script and a **Reformatted** version (`Ctrl+M`) — caret position is preserved across the toggle.
+* Syntax highlighting and incremental find-in-document.
+* **Dependent objects panel** — after scripting an object, related objects (e.g. triggers on a table) appear as clickable buttons that open their own tabs.
+* **Encrypted object support** — `WITH ENCRYPTION` objects can be decrypted in place (read-only, via a Dedicated Administrator Connection) after an explicit consent prompt; nothing is altered on the server.
+* **CLR object support** — CLR-backed procs/functions/triggers show both their thin T-SQL wrapper and a decompiled C# view of the actual implementation, with a "Save As DLL..." export.
 
-The search interface(s) in SQL Management Studio were always very cumbersome, so most of the time I was running queries
-like this over and over:
+<!-- SCREENSHOT: A scripted object tab showing Original/Reformatted toggle and the dependent-objects button strip -->
 
-```
-select *
-from foo.sys.tables t
-where t.name like '%something%'
-```
+### Script Databases (bulk export)
 
-...so I decided to make an application that would do this for me, with the added benefit of searching 
-across all databases on a server (if desired) as well as also searching within the objects' definitions as well.
+Export every object in one or more databases to individual `.sql` files on disk:
 
-I have come across tools that do similar things, but they had one or more of the following problems:
+* Pick a connection, pick an output folder, check off any subset of the server's databases, and run — with live per-database progress and elapsed time.
+* **Delta or full re-export** — if the output folder already has content, choose to re-script only what changed since last run (based on SQL Server's own modify metadata) or reset and start clean.
+* Optional **reformat all scripted code** through the same formatter used in the code viewer.
+* Optional **normalize auto-generated constraint names** (e.g. `PK__Orders__3213E83F...` → `PK_Orders_OrderID`) so scheduled exports don't churn on cosmetic renames.
+* Triggers are scripted as their own standalone files, matching how they're treated everywhere else in the app.
+* Explicit object-level **GRANT/DENY permissions** and full **DRI** (keys, indexes, defaults, checks) are included in every script.
+* CLR assemblies backing scripted objects are exported once each, as both `.dll` and decompiled `.cs`.
+* A live in-tab warnings list surfaces any object where the formatter's safety check rejected its own output — with a "Copy All" button for bug reports.
 
-* They were very buggy
-* They tried to do too much and didn't have enough focus on just *finding stuff*
-* They were super-expensive
+<!-- SCREENSHOT: Script Databases tab mid-run, showing per-database progress bars and the database checklist -->
 
-## Can you tell me other interesting facts about this thing?
+### New Query (QueryXLerator)
 
-Sure, I've got nothing better to do...
+An ad-hoc query tab, powered by the SqlPhanos.QueryXLerator engine:
 
-* Supports auth via Windows or SQL login with username/password
-* The app's icon is a totally awesome "recliner" because it makes your life so much easier, you'll have more time to relax in your easy chair
-* When searching for objects on the server:
-  * Allows you to search by object name, schema name and/or within object definition (including tables!)
-  * Can search across individual DB's on a server or all of them
-  * Searching across all DB's on a server doesn't generally impact the system too much
-  * Each query against an individual database is run asynchronously, so searching on a server with a large number of DB's will still happen quickly
-  * After you search, you can use somewhat sophisticated filtering techniques to narrow down those results on the client-side
-* When viewing object definition scripts
-  * Syntax highlighting, mainly thanks to [Avalon Edit](http://avalonedit.net/)
-  * Has option to canonicalize and reformat the object code using `Microsoft.SqlServer.TransactSql.ScriptDom`.
-    * HOWEVER... this formatting isn't really great at the moment, it needs a lot of refinement.
-  * Incremental find within object definition scripts.
-* Why is there a donkey that's crossed out in the status bar at the bottom of the window?
-  * Because a wacky Guamanian that we worked with kept calling this tool "donkey" for some reason.
+* Free-form SQL editor against the selected connection, with the same reformat button (`Ctrl+M`) as the code viewer.
+* **Execute** runs the query and writes every result set straight to an **XLSX workbook** — one worksheet per result set — with a configurable table style.
+* Column header suffixes control the output: `/sum`, `/average`, etc. add a totals-row aggregate; `/$` and `/%` apply currency/percent formatting; a column named `__tabname__` sets the worksheet's tab name instead of being written as data.
+
+<!-- SCREENSHOT: A New Query tab with results and the resulting XLSX file's formatting -->
+
+### Other
+
+* Multiple saved connection profiles (Windows Auth or SQL login, with an optional Trust Server Certificate toggle).
+* Configurable editor font family/size, and a setting for whether opening parens in column/parameter lists go on their own line.
+* Version shown in the title bar (derived from git tags via MinVer); an in-app "Update Available" notice checks GitHub Releases and can download/install/relaunch a new version for you.
+
+## The formatter's safety net
+
+SqlPhanos's SQL formatter is built on `Microsoft.SqlServer.TransactSql.ScriptDom` and works from the real token stream rather than raw text manipulation. Every time it formats something, it re-tokenizes its own output and verifies it represents the *same SQL* as the input before showing it to you. If that check fails, you get the original, unformatted text back instead — with a clear notice that formatting was skipped rather than silently correcting output that might be corrupted. This applies everywhere formatting happens: the code viewer, ad-hoc queries, and bulk database export.
 
 ## Requirements
 
-* .net 4.8 or higher 
-* Windows 11, but probably Win 10.
-  * I doubt it would run on Linux - never needed to try.
-* An MS SQL 2008 or higher database... _probably_. 
-  * This tool was developed years ago and was initially used extensively on SQL 2008. 
-  * Over the years, my work environment 
-    upgraded to 2014, then 2019, and the tool has always worked fine the whole time.
-  * But I haven't tried to hit anything older than 2014 for almost 5 years, and it's been at 
-    least a full year since I've tried anything older than 2019. I also haven't yet tried hitting
-    anything newer than 2019.
-  * As of Dec 2025, the current codebase has been upgraded - all the latest nuget packages for 
-    data access and "ScriptDom" have been updated. So there's now even a bit chance that older 
-    MSSQL platforms may have issues, so beware.
-    
+* Windows 10/11 (the app targets Windows and publishes a `win-x64` build; there's no current Linux/macOS support).
+* .NET 10.
+* A Microsoft SQL Server instance to connect to.
+
+## Status
+
+SqlPhanos is under active development. Expect rough edges in places — if the formatter ever produces something that looks wrong, its round-trip safety net should catch it and fall back to the original text rather than show you corrupted SQL, but please report anything that looks off.
