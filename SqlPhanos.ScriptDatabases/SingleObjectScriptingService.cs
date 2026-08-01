@@ -44,6 +44,12 @@ public static class SingleObjectScriptingService
             body.AppendLine("GO");
         }
 
+        // ScriptingOptions.Permissions (set above via ScriptingOptionsFactory) doesn't actually
+        // produce GRANT text for a single Urn-identified object - see
+        // ObjectPermissionScriptBuilder's own doc comment for why - so permissions are
+        // enumerated and appended separately here.
+        body.Append(ObjectPermissionScriptBuilder.BuildPermissionScript(server.GetSmoObject(urn)));
+
         string header = ObjectScriptHeaderBuilder.Build(
             objectName,
             serverDisplayName,
