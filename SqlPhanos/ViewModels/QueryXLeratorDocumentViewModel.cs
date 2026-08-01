@@ -27,6 +27,10 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 	private readonly string _connectionString;
 
 	private CancellationTokenSource? _cancellationTokenSource;
+	// Signaled when RunAsync's own finally block flips IsRunning back to false - lets
+	// ConfirmCloseWhileRunningAsync wait for the in-flight run to actually stop after Cancel().
+	private TaskCompletionSource? _operationCompletionTcs;
+	private TaskCompletionSource<bool>? _closeConfirmationTcs;
 
 	[ObservableProperty]
 	private string _queryText = "";
@@ -69,7 +73,13 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 	[NotifyPropertyChangedFor(nameof(IsContentInteractive))]
 	private bool _pendingFormattingSafetyWarning;
 
-	public bool IsContentInteractive => !ShowOverwriteConfirmation && !PendingFormattingSafetyWarning;
+	// Shown when the user tries to close this tab (X, Ctrl+W, or the Close Document menu item)
+	// while a run is in progress - see OnClose().
+	[ObservableProperty]
+	[NotifyPropertyChangedFor(nameof(IsContentInteractive))]
+	private bool _pendingCloseConfirmation;
+
+	public bool IsContentInteractive => !ShowOverwriteConfirmation && !PendingFormattingSafetyWarning && !PendingCloseConfirmation;
 
 	public string ConnectionDisplayName { get; }
 
@@ -178,6 +188,7 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 		IsInErrorState = false;
 		Status = "Running...";
 		DurationText = "";
+		_operationCompletionTcs = new TaskCompletionSource();
 
 		var started = DateTime.Now;
 		var cts = new CancellationTokenSource();
@@ -223,6 +234,55 @@ public partial class QueryXLeratorDocumentViewModel : Document, IHasTabHeaderLin
 			elapsedTimer.Stop();
 			_cancellationTokenSource = null;
 			IsRunning = false;
+			_operationCompletionTcs?.TrySetResult();
+			_operationCompletionTcs = null;
 		}
 	}
+
+	// See FactoryBase.OnDockableClosing (Dock.Model) - returning false here blocks the close (X
+	// button, Ctrl+W, and the "Close Document" menu item all funnel through this one hook)
+	// without cancelling anything yet, and ConfirmCloseWhileRunningAsync re-issues the close
+	// itself once the user actually confirms and the run has stopped.
+	public override bool OnClose()
+	{
+		if (!IsRunning)
+		{
+			return true;
+		}
+
+		if (_closeConfirmationTcs is null)
+		{
+			_ = ConfirmCloseWhileRunningAsync();
+		}
+
+		return false;
+	}
+
+	private async Task ConfirmCloseWhileRunningAsync()
+	{
+		_closeConfirmationTcs = new TaskCompletionSource<bool>();
+		PendingCloseConfirmation = true;
+		var confirmed = await _closeConfirmationTcs.Task;
+		PendingCloseConfirmation = false;
+		_closeConfirmationTcs = null;
+
+		if (!confirmed)
+		{
+			return;
+		}
+
+		Cancel();
+		if (_operationCompletionTcs is { } completion)
+		{
+			await completion.Task;
+		}
+
+		Factory?.CloseDockable(this);
+	}
+
+	[RelayCommand]
+	private void ConfirmClose() => _closeConfirmationTcs?.TrySetResult(true);
+
+	[RelayCommand]
+	private void KeepWorking() => _closeConfirmationTcs?.TrySetResult(false);
 }

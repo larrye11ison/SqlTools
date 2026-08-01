@@ -47,6 +47,13 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private IReadOnlyList<SqlTokenPosition>? _tokenPositions;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource<bool>? _encryptedConsentTcs;
+    private string? _clrAssemblyName;
+    private byte[]? _clrAssemblyBytes;
+    // Signaled when LoadAsync's own finally block flips IsScripting back to false - lets
+    // ConfirmCloseWhileRunningAsync wait for the in-flight load to actually stop after
+    // CancelScripting() (which only requests cancellation; it doesn't itself wait for anything).
+    private TaskCompletionSource? _operationCompletionTcs;
+    private TaskCompletionSource<bool>? _closeConfirmationTcs;
 
     public string CurrentSqlText
     {
@@ -101,6 +108,21 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         get => _originalSqlText;
         private set => SetProperty(ref _originalSqlText, value);
     }
+
+    // A CLR-backed proc/function/trigger's own T-SQL is just a thin "AS EXTERNAL NAME" wrapper -
+    // OriginalSqlText/FormattedSqlText above still show that (unchanged), and this holds the
+    // actual decompiled implementation underneath it, shown as a second section in the same tab.
+    [ObservableProperty]
+    private bool _isClrObject;
+
+    [ObservableProperty]
+    private string _decompiledClrSource = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasClrDecompileError))]
+    private string _clrDecompileError = "";
+
+    public bool HasClrDecompileError => !string.IsNullOrEmpty(ClrDecompileError);
 
     /// <summary>
     /// Objects that depend on the one scripted into this document (e.g. the triggers on a
@@ -166,7 +188,13 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [NotifyPropertyChangedFor(nameof(IsContentInteractive))]
     private bool _pendingFormattingSafetyWarning;
 
-    public bool IsContentInteractive => !PendingEncryptedConsent && !PendingFormattingSafetyWarning;
+    // Shown when the user tries to close this tab (X, Ctrl+W, or the Close Document menu item)
+    // while this object is still being scripted - see OnClose().
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsContentInteractive))]
+    private bool _pendingCloseConfirmation;
+
+    public bool IsContentInteractive => !PendingEncryptedConsent && !PendingFormattingSafetyWarning && !PendingCloseConfirmation;
 
     // Parameterless constructor exists only for the XAML Design.DataContext tag.
     public SqlDocumentViewModel()
@@ -195,9 +223,11 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private async Task LoadAsync()
     {
         _cts = new CancellationTokenSource();
+        _operationCompletionTcs = new TaskCompletionSource();
         try
         {
-            var script = await ScriptWithConsentAsync(_cts.Token);
+            var scripted = await ScriptWithConsentAsync(_cts.Token);
+            var script = scripted.ScriptText;
             var formatResult = _sqlCanonicalizationService.FormatForDisplayWithPositions(script, FormattingSettingsService.OpeningParenOnNewLine);
             OriginalSqlText = script;
             FormattedSqlText = formatResult.Text;
@@ -206,6 +236,11 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             DisplayMode = SqlDisplayMode.Original;
             FormattingSafetyCheckFailed = !formatResult.SafetyCheckPassed;
             PendingFormattingSafetyWarning = FormattingSafetyCheckFailed;
+
+            if (scripted.ClrAssemblyName is not null)
+            {
+                await LoadClrArtifactsAsync(scripted.ClrAssemblyName);
+            }
 
             try
             {
@@ -235,7 +270,60 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             IsScripting = false;
             _cts?.Dispose();
             _cts = null;
+            _operationCompletionTcs?.TrySetResult();
+            _operationCompletionTcs = null;
         }
+    }
+
+    /// <summary>
+    /// Fetches the CLR assembly's raw bytes and decompiles them into the standalone C# source
+    /// shown alongside the T-SQL wrapper - best-effort: a failure here (missing rights to
+    /// sys.assembly_files, an assembly decompilation chokes on) must not invalidate the SQL script
+    /// that already loaded successfully, so it's surfaced as a small inline note rather than
+    /// failing the whole document load.
+    /// </summary>
+    private async Task LoadClrArtifactsAsync(string assemblyName)
+    {
+        try
+        {
+            var bytes = await Task.Run(() =>
+                ClrAssemblyExporter.GetPrimaryAssemblyBytes(_connectionString, DbName, assemblyName, out _));
+            if (bytes is null)
+            {
+                ClrDecompileError = $"Assembly '{assemblyName}' has no rows in sys.assembly_files.";
+                return;
+            }
+
+            DecompiledClrSource = await Task.Run(() => ClrAssemblyDecompiler.Decompile(bytes, assemblyName));
+            // Prefer the class actually defining the SQL-facing API over the assembly's own SQL
+            // name (often unrelated to any type name in it) for the "Save As DLL" suggestion -
+            // same naming DatabaseScriptingService uses for the whole-DB export path.
+            _clrAssemblyName = ClrAssemblyExporter.TryGetPrimarySqlClrTypeName(bytes) ?? assemblyName;
+            _clrAssemblyBytes = bytes;
+            IsClrObject = true;
+        }
+        catch (Exception ex)
+        {
+            ClrDecompileError = $"Failed to fetch/decompile assembly '{assemblyName}': {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Raw bytes + a suggested file name for the "Save As DLL" button's code-behind file picker -
+    /// null when the loaded object isn't CLR-backed, or the fetch above failed.
+    /// </summary>
+    public bool TryGetClrAssemblyBytes(out byte[] bytes, out string suggestedFileName)
+    {
+        if (_clrAssemblyBytes is not null && _clrAssemblyName is not null)
+        {
+            bytes = _clrAssemblyBytes;
+            suggestedFileName = _clrAssemblyName + ".dll";
+            return true;
+        }
+
+        bytes = [];
+        suggestedFileName = "";
+        return false;
     }
 
     /// <summary>
@@ -245,7 +333,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     /// (before opening a DAC connection to decrypt), and this asks the user via the same
     /// in-tab overlay pattern before retrying with consent granted.
     /// </summary>
-    private async Task<string> ScriptWithConsentAsync(CancellationToken cancellationToken)
+    private async Task<SingleObjectScriptResult> ScriptWithConsentAsync(CancellationToken cancellationToken)
     {
         var allowEncryptedModuleDecrypt = false;
         while (true)
@@ -302,6 +390,53 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         _cts?.Cancel();
     }
+
+    // See FactoryBase.OnDockableClosing (Dock.Model) - returning false here blocks the close (X
+    // button, Ctrl+W, and the "Close Document" menu item all funnel through this one hook)
+    // without cancelling anything yet, and ConfirmCloseWhileRunningAsync re-issues the close
+    // itself once the user actually confirms and the load has stopped.
+    public override bool OnClose()
+    {
+        if (!IsScripting)
+        {
+            return true;
+        }
+
+        if (_closeConfirmationTcs is null)
+        {
+            _ = ConfirmCloseWhileRunningAsync();
+        }
+
+        return false;
+    }
+
+    private async Task ConfirmCloseWhileRunningAsync()
+    {
+        _closeConfirmationTcs = new TaskCompletionSource<bool>();
+        PendingCloseConfirmation = true;
+        var confirmed = await _closeConfirmationTcs.Task;
+        PendingCloseConfirmation = false;
+        _closeConfirmationTcs = null;
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        CancelScripting();
+        if (_operationCompletionTcs is { } completion)
+        {
+            await completion.Task;
+        }
+
+        Factory?.CloseDockable(this);
+    }
+
+    [RelayCommand]
+    private void ConfirmClose() => _closeConfirmationTcs?.TrySetResult(true);
+
+    [RelayCommand]
+    private void KeepWorking() => _closeConfirmationTcs?.TrySetResult(false);
 
     // Re-scripts the object from the server. Not a special "no-cache" path - it's just calling
     // ScriptWithConsentAsync again, which is already enough: SqlSearchService.ScriptObjectAsync

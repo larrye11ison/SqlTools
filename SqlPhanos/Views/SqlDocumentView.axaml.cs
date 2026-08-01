@@ -1,6 +1,8 @@
 ﻿using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using AvaloniaEdit;
@@ -18,10 +20,19 @@ namespace SqlPhanos.Views;
 
 public partial class SqlDocumentView : UserControl
 {
+    private enum FindTarget { Sql, Clr }
+
     private readonly RegistryOptions _registryOptions = new(ThemeName.DarkPlus);
     private TextEditor? _editor;
+    private TextEditor? _clrEditor;
+    private Grid? _contentGrid;
     private TextMateHost.Installation? _textMateInstallation;
+    private TextMateHost.Installation? _clrTextMateInstallation;
     private SearchPanel? _searchPanel;
+    private SearchPanel? _clrSearchPanel;
+    // Which editor's Find panel is currently open, if any - Ctrl+F toggles between the two
+    // rather than opening both at once. Null until the first Ctrl+F (or after both are closed).
+    private FindTarget? _openFindTarget;
     private SqlDocumentViewModel? _trackedViewModel;
     private int? _pendingCaretOffset;
     private bool _pendingCaretWasFormatted;
@@ -58,7 +69,37 @@ public partial class SqlDocumentView : UserControl
 
     public void OpenFind()
     {
-        if (_searchPanel is null)
+        // A CLR object's tab has two editors (SQL wrapper + decompiled C#) sharing the same
+        // Ctrl+F - only one Find panel may be open at a time, and repeated Ctrl+F presses toggle
+        // which editor it's attached to, rather than both showing up together.
+        var clrAvailable = _clrEditor is { IsVisible: true };
+
+        FindTarget target;
+        if (_openFindTarget is { } current)
+        {
+            target = current == FindTarget.Sql ? FindTarget.Clr : FindTarget.Sql;
+            if (target == FindTarget.Clr && !clrAvailable)
+            {
+                target = FindTarget.Sql;
+            }
+        }
+        else
+        {
+            // First press: prefer whichever editor currently has focus, so Ctrl+F acts on
+            // wherever the user's attention already is rather than always defaulting to the top.
+            target = clrAvailable && _clrEditor!.TextArea.IsFocused ? FindTarget.Clr : FindTarget.Sql;
+        }
+
+        var (panelToOpen, panelToClose) = target == FindTarget.Sql
+            ? (_searchPanel, _clrSearchPanel)
+            : (_clrSearchPanel, _searchPanel);
+
+        if (panelToClose is { IsClosed: false })
+        {
+            panelToClose.Close();
+        }
+
+        if (panelToOpen is null)
         {
             return;
         }
@@ -73,18 +114,58 @@ public partial class SqlDocumentView : UserControl
         // the panel as a child, and its search box needs its own template applied - the same
         // "control not materialized yet" timing already solved elsewhere in this app - before
         // Reactivate()'s Focus() call has anything real to land on.
-        if (_searchPanel.IsClosed)
+        if (panelToOpen.IsClosed)
         {
-            _searchPanel.Open();
+            panelToOpen.Open();
         }
 
-        Dispatcher.UIThread.Post(() => _searchPanel.Reactivate(), DispatcherPriority.Input);
+        Dispatcher.UIThread.Post(() => panelToOpen.Reactivate(), DispatcherPriority.Input);
+        _openFindTarget = target;
     }
 
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
         _editor = this.FindControl<TextEditor>("Editor");
+        _clrEditor = this.FindControl<TextEditor>("ClrEditor");
+        _contentGrid = this.FindControl<Grid>("ContentGrid");
+    }
+
+    private void OnSaveAsDllClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SqlDocumentViewModel viewModel ||
+            !viewModel.TryGetClrAssemblyBytes(out var bytes, out var suggestedFileName))
+        {
+            return;
+        }
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            return;
+        }
+
+        async void SaveAsync()
+        {
+            var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save assembly as",
+                SuggestedFileName = suggestedFileName,
+                DefaultExtension = "dll",
+                FileTypeChoices = new[]
+                {
+                    new FilePickerFileType("Assembly DLL") { Patterns = new[] { "*.dll" } }
+                }
+            });
+
+            if (file is not null)
+            {
+                await using var stream = await file.OpenWriteAsync();
+                await stream.WriteAsync(bytes);
+            }
+        }
+
+        SaveAsync();
     }
 
     private void OnFontSettingsChanged(object? sender, System.EventArgs e)
@@ -99,6 +180,12 @@ public partial class SqlDocumentView : UserControl
             _editor.FontFamily = new FontFamily(FontSettingsService.CurrentFontFamily);
             _editor.FontSize = FontSettingsService.CurrentFontSize;
         }
+
+        if (_clrEditor is not null)
+        {
+            _clrEditor.FontFamily = new FontFamily(FontSettingsService.CurrentFontFamily);
+            _clrEditor.FontSize = FontSettingsService.CurrentFontSize;
+        }
     }
 
     private void EnsureTextMateInstalled()
@@ -109,6 +196,10 @@ public partial class SqlDocumentView : UserControl
         }
 
         _searchPanel ??= SearchPanel.Install(_editor);
+        if (_clrEditor is not null)
+        {
+            _clrSearchPanel ??= SearchPanel.Install(_clrEditor);
+        }
 
         if (_textMateInstallation is not null)
         {
@@ -120,6 +211,16 @@ public partial class SqlDocumentView : UserControl
             _registryOptions,
             true,
             ex => System.Diagnostics.Debug.WriteLine($"TextMate initialization error: {ex.Message}"));
+
+        if (_clrEditor is not null)
+        {
+            _clrTextMateInstallation = TextMateHost.InstallTextMate(
+                _clrEditor,
+                _registryOptions,
+                true,
+                ex => System.Diagnostics.Debug.WriteLine($"TextMate initialization error (CLR editor): {ex.Message}"));
+            _clrTextMateInstallation.SetGrammar("source.cs");
+        }
 
         ApplyTheme();
         SyncFromViewModel();
@@ -146,12 +247,41 @@ public partial class SqlDocumentView : UserControl
             _trackedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             UpdateEditorDocument(viewModel);
             ApplyGrammar(viewModel.SyntaxScopeName);
+            // Re-attaching (e.g. switching MDI tabs away and back) disposes and reinstalls
+            // TextMate (see AttachedToVisualTree/DetachedFromVisualTree), which is what was
+            // silently dropping the decompiled C# pane's content - nothing here previously
+            // restored it or the CLR-vs-non-CLR row sizing on that path, only the main editor.
+            UpdateClrEditorDocument(viewModel);
+            ApplyClrRowSizing(viewModel);
         }
         else
         {
             _editor.Document = new TextDocument();
             ApplyGrammar("source.sql");
         }
+    }
+
+    // The CLR pane's row is star-sized (for the GridSplitter to resize against the SQL editor)
+    // rather than Auto, so it doesn't automatically collapse to zero height just because its
+    // content's IsVisible is false the way an Auto row would - a non-CLR object was otherwise
+    // left with a large empty reserved area where the CLR pane would be. IsClrObject/
+    // HasClrDecompileError are fixed for a given tab's whole lifetime (one object scripted once),
+    // so this only ever needs to run once per load/reattach, not track further live changes.
+    private void ApplyClrRowSizing(SqlDocumentViewModel viewModel)
+    {
+        if (_contentGrid is null || _contentGrid.RowDefinitions.Count < 3)
+        {
+            return;
+        }
+
+        // Star-sized (splitter-adjustable) when there's a real second editor to show; Auto
+        // (just big enough for the one-line error banner, no splitter) when decompilation failed
+        // and there's no editor to divide space with; zero for an ordinary non-CLR object.
+        _contentGrid.RowDefinitions[2].Height = viewModel.IsClrObject
+            ? new GridLength(3, GridUnitType.Star)
+            : viewModel.HasClrDecompileError
+                ? GridLength.Auto
+                : new GridLength(0);
     }
 
     private void OnViewModelPropertyChanging(object? sender, PropertyChangingEventArgs e)
@@ -182,6 +312,26 @@ public partial class SqlDocumentView : UserControl
         {
             UpdateEditorDocument(viewModel);
         }
+        else if (e.PropertyName == nameof(SqlDocumentViewModel.DecompiledClrSource))
+        {
+            UpdateClrEditorDocument(viewModel);
+        }
+        else if (e.PropertyName is nameof(SqlDocumentViewModel.IsClrObject) or nameof(SqlDocumentViewModel.HasClrDecompileError))
+        {
+            ApplyClrRowSizing(viewModel);
+        }
+    }
+
+    private void UpdateClrEditorDocument(SqlDocumentViewModel viewModel)
+    {
+        if (_clrEditor is null)
+        {
+            return;
+        }
+
+        // Set once when decompilation finishes, never toggled back and forth like Original/
+        // Formatted - no caret/scroll preservation needed, unlike UpdateEditorDocument above.
+        _clrEditor.Document = new TextDocument(viewModel.DecompiledClrSource ?? string.Empty);
     }
 
     private void UpdateEditorDocument(SqlDocumentViewModel viewModel)
@@ -269,30 +419,32 @@ public partial class SqlDocumentView : UserControl
 
     private void ApplyTheme()
     {
-        if (_textMateInstallation is null)
-        {
-            return;
-        }
-
         var themeName = ActualThemeVariant == ThemeVariant.Light
             ? ThemeName.LightPlus
             : ThemeName.DarkPlus;
 
-        _textMateInstallation.SetTheme(_registryOptions.LoadTheme(themeName));
+        _textMateInstallation?.SetTheme(_registryOptions.LoadTheme(themeName));
+        _clrTextMateInstallation?.SetTheme(_registryOptions.LoadTheme(themeName));
     }
 
     private void DisposeTextMate()
     {
         if (_trackedViewModel is not null)
         {
+            _trackedViewModel.PropertyChanging -= OnViewModelPropertyChanging;
             _trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _trackedViewModel = null;
         }
 
         _textMateInstallation?.Dispose();
         _textMateInstallation = null;
+        _clrTextMateInstallation?.Dispose();
+        _clrTextMateInstallation = null;
 
         _searchPanel?.Uninstall();
         _searchPanel = null;
+        _clrSearchPanel?.Uninstall();
+        _clrSearchPanel = null;
+        _openFindTarget = null;
     }
 }

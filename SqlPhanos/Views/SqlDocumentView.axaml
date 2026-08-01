@@ -24,6 +24,17 @@
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
         </Style>
+
+        <!-- Plain GridSplitter has no background by default, so it renders as literally nothing -
+             a divider a user has no reason to know is draggable. A visible bar plus an
+             accent-colored hover state gives it the same "yes, drag this" affordance any IDE
+             splitter has. -->
+        <Style Selector="GridSplitter">
+            <Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+        </Style>
+        <Style Selector="GridSplitter:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid>
@@ -112,12 +123,64 @@
             </StackPanel>
         </Border>
 
-        <editor:TextEditor x:Name="Editor"
-                           IsReadOnly="True"
-                           ShowLineNumbers="True"
-                           WordWrap="False"
-                           HorizontalScrollBarVisibility="Auto"
-                           VerticalScrollBarVisibility="Auto"/>
+        <Grid x:Name="ContentGrid" RowDefinitions="1*,Auto,3*">
+            <editor:TextEditor x:Name="Editor"
+                               Grid.Row="0"
+                               IsReadOnly="True"
+                               ShowLineNumbers="True"
+                               WordWrap="False"
+                               HorizontalScrollBarVisibility="Auto"
+                               VerticalScrollBarVisibility="Auto"/>
+
+            <GridSplitter Grid.Row="1" Height="6" IsVisible="{Binding IsClrObject}" ResizeDirection="Rows"/>
+
+            <!-- Purely decorative grip dots layered on top of the splitter bar (same Grid cell) -
+                 IsHitTestVisible="False" so drag/click still reaches the GridSplitter beneath. -->
+            <TextBlock Grid.Row="1"
+                       Text="•••"
+                       FontSize="10"
+                       LineHeight="6"
+                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       IsHitTestVisible="False"
+                       IsVisible="{Binding IsClrObject}"/>
+
+            <!-- CLR objects only script a thin "AS EXTERNAL NAME" wrapper above - this is the
+                 actual decompiled implementation, shown alongside it rather than in place of it.
+                 Nested in its own Auto/* grid so the splitter above only ever resizes this whole
+                 pane as a unit against the SQL editor - the header inside it stays a fixed size
+                 regardless, and only the editor (the "*" row here) absorbs the size change. -->
+            <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                <Border Grid.Row="0"
+                        IsVisible="{Binding IsClrObject}"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                        BorderThickness="0,1"
+                        Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Decompiled CLR implementation:" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="12"/>
+                        <Button Content="Save As DLL..." Click="OnSaveAsDllClick"/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Grid.Row="0"
+                           IsVisible="{Binding HasClrDecompileError}"
+                           Text="{Binding ClrDecompileError}"
+                           Foreground="IndianRed"
+                           TextWrapping="Wrap"
+                           Padding="12,6"/>
+
+                <editor:TextEditor x:Name="ClrEditor"
+                                   Grid.Row="1"
+                                   IsVisible="{Binding IsClrObject}"
+                                   IsReadOnly="True"
+                                   ShowLineNumbers="True"
+                                   WordWrap="False"
+                                   HorizontalScrollBarVisibility="Auto"
+                                   VerticalScrollBarVisibility="Auto"/>
+            </Grid>
+        </Grid>
     </DockPanel>
 
     <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a DAC
@@ -170,6 +233,29 @@
                 </TextBlock>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
                     <Button Command="{Binding DismissFormattingSafetyWarningCommand}" Content="OK" Classes="accent" IsDefault="True"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+
+    <!-- Closing this tab (X, Ctrl+W, the Close Document menu item) while the object is still
+         being scripted would otherwise silently abandon it - see SqlDocumentViewModel.OnClose. -->
+    <Grid x:Name="CloseConfirmationOverlay" IsVisible="{Binding PendingCloseConfirmation}" Background="#80000000">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="20"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MaxWidth="420">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Scripting is still running" FontWeight="Bold" FontSize="16"/>
+                <TextBlock TextWrapping="Wrap"
+                           Text="Closing this tab will cancel scripting in progress. Close anyway?"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                    <Button Command="{Binding ConfirmCloseCommand}" Content="Cancel &amp; Close" Classes="accent"/>
+                    <Button Command="{Binding KeepWorkingCommand}" Content="Keep Working" IsDefault="True" IsCancel="True"/>
                 </StackPanel>
             </StackPanel>
         </Border>
