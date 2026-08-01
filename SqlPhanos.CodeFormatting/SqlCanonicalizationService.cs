@@ -133,6 +133,22 @@ public sealed class SqlCanonicalizationService
 			var inCreateStatementParams = false;
 			var afterCreateObjectName = false;
 			var createObjectRequiresAs = true;
+			// True from a proc/function-level WITH (e.g. "WITH EXECUTE AS CALLER", "WITH
+			// RECOMPILE") through the object's real body-starting AS - lets EXECUTE inside it be
+			// recognized as part of "EXECUTE AS <caller-spec>" rather than a real EXEC call, and
+			// lets the AS case tell "EXECUTE AS"'s own AS apart from the real body AS that still
+			// follows it (both would otherwise satisfy the exact same isCreateContextAs check).
+			var inCreateObjectWithClause = false;
+			// True immediately after EXECUTE inside inCreateObjectWithClause, until the very next
+			// AS (that clause's own "AS <caller-spec>") is consumed.
+			var expectingExecuteAsIntroducerAs = false;
+			// Same span as afterCreateObjectName/createObjectRequiresAs (from a CREATE
+			// PROC/FUNCTION/TRIGGER name through its real body AS), but - unlike
+			// inCreateStatementParams - never cleared by RETURNS's own handling, so a scalar
+			// function's "RETURNS int WITH EXECUTE AS ..." can still recognize WITH as its
+			// options clause after RETURNS has already cleared inCreateStatementParams for its
+			// own (unrelated) reasons.
+			var pendingCreateObjectBodyAs = false;
 			var pendingInsertColumnList = false;
 			var inInsertColumnList = false;
 			var inInsertWithHint = false;
@@ -434,6 +450,7 @@ public sealed class SqlCanonicalizationService
 						result.Append(token.Text.ToUpperInvariant());
 						afterCreateObjectName = true;
 						createObjectRequiresAs = true;
+						pendingCreateObjectBodyAs = true;
 						previousWasStatementEnd = false;
 						break;
 
@@ -452,6 +469,7 @@ public sealed class SqlCanonicalizationService
 						{
 							afterCreateObjectName = true;
 							createObjectRequiresAs = true;
+							pendingCreateObjectBodyAs = true;
 						}
 						previousWasStatementEnd = false;
 						break;
@@ -493,7 +511,25 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.As:
-						var isCreateContextAs = !inDeclareStatement && (inCreateStatementParams || afterCreateObjectName);
+						if (inCreateObjectWithClause && expectingExecuteAsIntroducerAs)
+						{
+							// The "EXECUTE AS <caller-spec>" sub-clause's own AS - not the object's
+							// real body-starting AS (that one still follows). Indented one level
+							// deeper than WITH's own line, as a detail of that clause; stays inline
+							// with whatever caller-spec (CALLER/OWNER/SELF/'login') follows it.
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel + 1, ref lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							expectingExecuteAsIntroducerAs = false;
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						// inCreateObjectWithClause (rather than pendingCreateObjectBodyAs here) is the
+						// precise signal: it's only true once a WITH clause has actually been seen,
+						// so a bare "RETURNS int AS" with no WITH clause at all is unaffected and
+						// still falls through to the plain glued-inline branch below, unchanged.
+						var isCreateContextAs = !inDeclareStatement && (inCreateStatementParams || afterCreateObjectName || inCreateObjectWithClause);
 						if (isCreateContextAs)
 						{
 							AppendLineIfNeeded(result, ref lineStart);
@@ -503,6 +539,8 @@ public sealed class SqlCanonicalizationService
 							lineStart = true;
 							inCreateStatementParams = false;
 							afterCreateObjectName = false;
+							inCreateObjectWithClause = false;
+							pendingCreateObjectBodyAs = false;
 						}
 						else if (inDeclareStatement)
 						{
@@ -794,6 +832,17 @@ public sealed class SqlCanonicalizationService
 							break;
 						}
 
+						if (inCreateObjectWithClause)
+						{
+							// "WITH EXECUTE AS <caller-spec>" - a stored proc/function's execution-
+							// context clause, not a real EXEC call; stays inline on WITH's own line.
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							expectingExecuteAsIntroducerAs = true;
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendLineIfNeeded(result, ref lineStart);
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
@@ -878,6 +927,19 @@ public sealed class SqlCanonicalizationService
 							AppendLineIfNeeded(result, ref lineStart);
 							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						if (!inDeclareStatement && (inCreateStatementParams || afterCreateObjectName || pendingCreateObjectBodyAs))
+						{
+							// A proc/function-level options clause - "WITH EXECUTE AS ...",
+							// "WITH ENCRYPTION", "WITH RECOMPILE", etc. - not glued onto the
+							// parameter list it follows.
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							inCreateObjectWithClause = true;
 							previousWasStatementEnd = false;
 							break;
 						}
@@ -1340,7 +1402,7 @@ public sealed class SqlCanonicalizationService
 							lineStart = true;
 							currentLineTokenLength = 0;
 						}
-						else if ((inInsertColumnList && parenthesisDepth == insertColumnListDepth) || (inValuesList && parenthesisDepth == valuesListDepth) || (inCreateStatementParams && parenthesisDepth == (createObjectParameterListDepth < 0 ? 0 : createObjectParameterListDepth)) || (inSelectColumnList && selectStatementDepth > 0 && (parenthesisDepth == 0 || (applyParenthesisDepth > 0 && parenthesisDepth == applyParenthesisDepth))))
+						else if ((inInsertColumnList && parenthesisDepth == insertColumnListDepth) || (inValuesList && parenthesisDepth == valuesListDepth) || (inCreateStatementParams && !inCreateObjectWithClause && parenthesisDepth == (createObjectParameterListDepth < 0 ? 0 : createObjectParameterListDepth)) || (inSelectColumnList && selectStatementDepth > 0 && (parenthesisDepth == 0 || (applyParenthesisDepth > 0 && parenthesisDepth == applyParenthesisDepth))))
 						{
 							result.AppendLine();
 							lineStart = true;
@@ -2361,6 +2423,9 @@ public sealed class SqlCanonicalizationService
 					inSecurityStatement = false;
 					securityStatementPastPermissionList = false;
 					inSecurityStatementPrincipalList = false;
+					inCreateObjectWithClause = false;
+					expectingExecuteAsIntroducerAs = false;
+					pendingCreateObjectBodyAs = false;
 				}
 			}
 
