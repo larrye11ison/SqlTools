@@ -191,3 +191,6 @@ GeneratedArtifacts/
 _Pvt_Extensions/
 ModelManifest.xml
 /.cr/Settings.xml
+
+# Standalone SQLCLR test fixture - not part of the solution, local scratch project only
+/SqlClrTest/

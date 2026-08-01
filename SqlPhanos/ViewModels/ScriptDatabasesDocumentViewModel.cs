@@ -34,6 +34,11 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 	private CancellationTokenSource? _cts;
 	private TaskCompletionSource<bool>? _encryptedConsentTcs;
 	private TaskCompletionSource<ScriptOutputConflictChoice>? _outputConflictTcs;
+	// Signaled when ScriptAsync's own finally block flips IsRunning back to false - lets
+	// ConfirmCloseWhileRunningAsync wait for the in-flight run to actually stop after Cancel()
+	// (which only requests cancellation; it doesn't itself wait for anything).
+	private TaskCompletionSource? _operationCompletionTcs;
+	private TaskCompletionSource<bool>? _closeConfirmationTcs;
 
 	[ObservableProperty]
 	[NotifyPropertyChangedFor(nameof(TabIconState))]
@@ -67,7 +72,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 	private bool _pendingEncryptedConsent;
 
 	[ObservableProperty]
-	private string _pendingEncryptedDatabaseName = "";
+	private string _pendingEncryptedScopeDescription = "";
 
 	[ObservableProperty]
 	private int _pendingEncryptedCount;
@@ -77,6 +82,11 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 
 	[ObservableProperty]
 	private string _pendingOutputConflictFolders = "";
+
+	// Shown when the user tries to close this tab (X, Ctrl+W, or the Close Document menu item)
+	// while a run is in progress - see OnClose().
+	[ObservableProperty]
+	private bool _pendingCloseConfirmation;
 
 	// Per-object warnings surfaced during a run - currently just SqlCanonicalizationService's own
 	// round-trip safety check rejecting a reformatted object (see IsRoundTripSafe) and keeping
@@ -180,6 +190,20 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		}
 	}
 
+	// Purely cosmetic - lets the user see which databases are running without scrolling, since a
+	// long unattended run otherwise buries the active DB wherever it happened to sort originally.
+	// Doesn't affect scripting order: targets is already captured (as references to the same
+	// DatabaseListItem instances) before this runs, from the caller's own Databases.Where(...).
+	private void ReorderCheckedFirst()
+	{
+		var ordered = Databases.OrderByDescending(item => item.IsSelected).ToList();
+		Databases.Clear();
+		foreach (var item in ordered)
+		{
+			Databases.Add(item);
+		}
+	}
+
 	[RelayCommand(CanExecute = nameof(CanRunScript))]
 	private async Task ScriptAsync()
 	{
@@ -196,12 +220,15 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 			return;
 		}
 
+		ReorderCheckedFirst();
+
 		IsRunning = true;
 		IsInErrorState = false;
 		Status = "Starting...";
 		DurationText = "";
 		OverallProgressPercent = 0;
 		Warnings.Clear();
+		_operationCompletionTcs = new TaskCompletionSource();
 
 		var started = DateTime.Now;
 		var cts = new CancellationTokenSource();
@@ -224,6 +251,29 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 				return;
 			}
 
+			// Check every selected database for encrypted modules up front, before any scripting
+			// starts, and ask for consent (if needed) exactly once - otherwise a long unattended
+			// run silently stalls on whichever database first turns out to have one, however deep
+			// into the batch that happens to be.
+			Status = $"Checking {targets.Count} database(s) for encrypted modules...";
+			var totalEncrypted = 0;
+			foreach (var target in targets)
+			{
+				cts.Token.ThrowIfCancellationRequested();
+				totalEncrypted += await _scriptingService.CountEncryptedObjectsAsync(_connectionString, target.Name, cts.Token);
+			}
+
+			var allowEncryptedModuleDecrypt = false;
+			if (totalEncrypted > 0)
+			{
+				allowEncryptedModuleDecrypt = await RequestEncryptedConsentAsync($"{targets.Count} selected database(s)", totalEncrypted);
+				if (!allowEncryptedModuleDecrypt)
+				{
+					Status = "Cancelled (encrypted modules declined).";
+					return;
+				}
+			}
+
 			var completed = 0;
 			var normalizedNameTotal = 0;
 			foreach (var item in targets)
@@ -233,7 +283,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 
 				try
 				{
-					var result = await ScriptOneDatabaseWithConsentAsync(item, mode.Value, completed, targets.Count, cts.Token);
+					var result = await ScriptOneDatabaseWithConsentAsync(item, mode.Value, completed, targets.Count, allowEncryptedModuleDecrypt, cts.Token);
 					item.FinalOutputDirectory = result.OutputDirectory;
 					normalizedNameTotal += result.NormalizedConstraintNameCount;
 					item.CompleteScripting();
@@ -274,8 +324,57 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 			elapsedTimer.Stop();
 			_cts = null;
 			IsRunning = false;
+			_operationCompletionTcs?.TrySetResult();
+			_operationCompletionTcs = null;
 		}
 	}
+
+	// See FactoryBase.OnDockableClosing (Dock.Model) - returning false here blocks the close (X
+	// button, Ctrl+W, and the "Close Document" menu item all funnel through this one hook)
+	// without cancelling anything yet, and ConfirmCloseWhileRunningAsync re-issues the close
+	// itself once the user actually confirms and the run has stopped.
+	public override bool OnClose()
+	{
+		if (!IsRunning)
+		{
+			return true;
+		}
+
+		if (_closeConfirmationTcs is null)
+		{
+			_ = ConfirmCloseWhileRunningAsync();
+		}
+
+		return false;
+	}
+
+	private async Task ConfirmCloseWhileRunningAsync()
+	{
+		_closeConfirmationTcs = new TaskCompletionSource<bool>();
+		PendingCloseConfirmation = true;
+		var confirmed = await _closeConfirmationTcs.Task;
+		PendingCloseConfirmation = false;
+		_closeConfirmationTcs = null;
+
+		if (!confirmed)
+		{
+			return;
+		}
+
+		Cancel();
+		if (_operationCompletionTcs is { } completion)
+		{
+			await completion.Task;
+		}
+
+		Factory?.CloseDockable(this);
+	}
+
+	[RelayCommand]
+	private void ConfirmClose() => _closeConfirmationTcs?.TrySetResult(true);
+
+	[RelayCommand]
+	private void KeepWorking() => _closeConfirmationTcs?.TrySetResult(false);
 
 	[RelayCommand(CanExecute = nameof(IsRunning))]
 	private void Cancel()
@@ -432,9 +531,9 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		ScriptingMode mode,
 		int completedDatabases,
 		int totalDatabases,
+		bool allowEncryptedModuleDecrypt,
 		CancellationToken cancellationToken)
 	{
-		var allowEncryptedModuleDecrypt = false;
 		while (true)
 		{
 			var progress = new Progress<ScriptingProgressReport>(report =>
@@ -459,7 +558,11 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 			}
 			catch (EncryptedModulesConsentRequiredException consent)
 			{
-				var accepted = await RequestEncryptedConsentAsync(consent.DatabaseName, consent.EncryptedCount);
+				// Defensive fallback only - the upfront check in ScriptAsync already asks once for
+				// every selected database before this loop ever starts, so this normally never
+				// fires. Left in case an object becomes encrypted between that check and actually
+				// reaching it here.
+				var accepted = await RequestEncryptedConsentAsync($"Database '{consent.DatabaseName}'", consent.EncryptedCount);
 				if (!accepted)
 				{
 					throw new OperationCanceledException("Encrypted module decrypt declined.", cancellationToken);
@@ -470,12 +573,12 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 		}
 	}
 
-	private Task<bool> RequestEncryptedConsentAsync(string databaseName, int encryptedCount)
+	private Task<bool> RequestEncryptedConsentAsync(string scopeDescription, int encryptedCount)
 	{
 		_encryptedConsentTcs = new TaskCompletionSource<bool>();
 		Dispatcher.UIThread.Post(() =>
 		{
-			PendingEncryptedDatabaseName = databaseName;
+			PendingEncryptedScopeDescription = scopeDescription;
 			PendingEncryptedCount = encryptedCount;
 			PendingEncryptedConsent = true;
 		});
@@ -499,7 +602,7 @@ public partial class ScriptDatabasesDocumentViewModel : Document, IHasTabHeaderL
 				? 1
 				: (double)report.CompletedObjects / report.TotalObjects;
 			OverallProgressPercent = 100.0 * (completedDatabases + databaseFraction) / totalDatabases;
-			Status = $"{report.CompletedObjects} / {report.TotalObjects} objects, {report.ParallelTasks} parallel " +
+			Status = $"{report.DatabaseName}: {report.CompletedObjects} / {report.TotalObjects} objects, {report.ParallelTasks} parallel " +
 				$"({completedDatabases + 1}/{totalDatabases} DBs)";
 			item.ReportProgress(
 				report.TotalObjects == 0 ? 100 : 100.0 * report.CompletedObjects / report.TotalObjects,

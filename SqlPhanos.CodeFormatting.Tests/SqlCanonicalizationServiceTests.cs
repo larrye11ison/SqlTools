@@ -2753,6 +2753,125 @@ public sealed class SqlCanonicalizationServiceTests
 		RunFactTest(sql, expected);
 	}
 
+	[Fact]
+	public void CreateProcedureWithExecuteAsAndExternalNameFormatsAsDistinctClauses()
+	{
+		// Regression test: EXECUTE inside "WITH EXECUTE AS ..." was being treated like a real EXEC
+		// statement call (forcing its own line, flipping inExecParams), and the formatter had no
+		// way to tell "EXECUTE AS <caller-spec>"'s own AS apart from the procedure's real
+		// body-starting AS - the first AS it saw after the parameter list always won, silently
+		// consuming the wrong one and leaving the second AS (and everything after it) to fall
+		// through generic keyword handling. Produced "@a nvarchar(4000) WITH\nEXECUTE\nAS\nCALLER
+		// AS \tEXTERNAL NAME ..." - WITH glued to the parameter list, and the two AS/EXTERNAL NAME
+		// pieces scrambled across lines with a stray injected tab.
+		var sql = "CREATE OR ALTER PROCEDURE [dbo].[InsertA] @a nvarchar(4000) WITH EXECUTE AS CALLER AS EXTERNAL NAME [SqlClrTest].[SqlClrTest.StoredProcedures].[InsertA];";
+		var expected = """
+			CREATE OR ALTER PROCEDURE [dbo].[InsertA]
+				@a nvarchar(4000)
+			WITH EXECUTE
+				AS CALLER
+			AS
+			EXTERNAL NAME [SqlClrTest].[SqlClrTest.StoredProcedures].[InsertA];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateProcedureWithParenthesizedParamsAndExecuteAsFormatsSameAsBareParams()
+	{
+		var sql = "CREATE OR ALTER PROCEDURE [dbo].[InsertA] (@a nvarchar(4000)) WITH EXECUTE AS CALLER AS EXTERNAL NAME [SqlClrTest].[SqlClrTest.StoredProcedures].[InsertA];";
+		var expected = """
+			CREATE OR ALTER PROCEDURE [dbo].[InsertA] (
+				@a nvarchar(4000)
+			)
+			WITH EXECUTE
+				AS CALLER
+			AS
+			EXTERNAL NAME [SqlClrTest].[SqlClrTest.StoredProcedures].[InsertA];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateProcedureWithMultipleWithOptionsKeepsExecuteAsOnSameLine()
+	{
+		var sql = "CREATE PROCEDURE dbo.P1 @a int WITH RECOMPILE, EXECUTE AS CALLER AS BEGIN SELECT 1; END;";
+		var expected = """
+			CREATE PROCEDURE dbo.P1
+				@a int
+			WITH RECOMPILE, EXECUTE
+				AS CALLER
+			AS
+			BEGIN
+				SELECT 1;
+
+			END;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateProcedureWithPlainWithOptionNoExecuteAsBreaksBeforeAs()
+	{
+		// No EXECUTE AS clause at all - only WITH's own gluing-to-the-parameter-list needed
+		// fixing here; the (already-correct) plain AS/BEGIN relationship is unchanged.
+		var sql = "CREATE PROCEDURE dbo.P1 @a int WITH ENCRYPTION AS BEGIN SELECT 1; END;";
+		var expected = """
+			CREATE PROCEDURE dbo.P1
+				@a int
+			WITH ENCRYPTION
+			AS
+			BEGIN
+				SELECT 1;
+
+			END;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateFunctionWithReturnsAndExecuteAsFormatsCorrectly()
+	{
+		// RETURNS's own handling clears inCreateStatementParams for unrelated reasons (see its own
+		// comment) - WITH must still recognize the options clause after that happens.
+		var sql = "CREATE FUNCTION dbo.F1(@a int) RETURNS int WITH EXECUTE AS CALLER AS EXTERNAL NAME asm.cls.Method;";
+		var expected = """
+			CREATE FUNCTION dbo.F1(
+				@a int
+			)
+			RETURNS int
+			WITH EXECUTE
+				AS CALLER
+			AS
+			EXTERNAL NAME asm.cls.Method;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void CreateFunctionWithReturnsAndNoWithClauseKeepsAsGluedToReturns()
+	{
+		// Regression test: this must NOT be affected by the WITH/EXECUTE AS fix above - a bare
+		// "RETURNS <type> AS" with no WITH clause at all has always kept AS glued to RETURNS's
+		// type rather than breaking onto its own line.
+		var sql = "CREATE FUNCTION dbo.fSampleFunc () RETURNS int AS BEGIN RETURN 1; END";
+		var expected = """
+			CREATE FUNCTION dbo.fSampleFunc ()
+			RETURNS int AS
+			BEGIN
+				RETURN 1;
+
+			END;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
 	private string NormalizeWhitespace(string input)
 	{
 		// Preserve comments and original SQL structure exactly; only normalize line endings.

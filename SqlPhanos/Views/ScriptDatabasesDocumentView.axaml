@@ -19,6 +19,8 @@
                 <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
                     <Binding Path="!PendingEncryptedConsent"/>
                     <Binding Path="!PendingOutputConflict"/>
+                    <Binding Path="!IsRunning"/>
+                    <Binding Path="!PendingCloseConfirmation"/>
                 </MultiBinding>
             </DockPanel.IsEnabled>
             <!-- Output directory -->
@@ -194,8 +196,8 @@
                 <StackPanel Spacing="8">
                     <TextBlock Text="Encrypted modules detected" FontWeight="Bold" FontSize="16"/>
                     <TextBlock TextWrapping="Wrap">
-                        <Run Text="{Binding PendingEncryptedDatabaseName}"/>
-                        <Run Text=" has "/>
+                        <Run Text="{Binding PendingEncryptedScopeDescription}"/>
+                        <Run Text=" contains "/>
                         <Run Text="{Binding PendingEncryptedCount}"/>
                         <Run Text=" encrypted module(s) (WITH ENCRYPTION). Decrypting requires opening a Dedicated Administrator Connection (DAC / ADMIN:) and requires sysadmin (or equivalent) - for remote instances, 'remote admin connections' must be enabled. Nothing is altered or dropped on the server."/>
                     </TextBlock>
@@ -237,6 +239,29 @@
                         <Button x:Name="ChooseDeltaButton" Command="{Binding ChooseDeltaCommand}" Content="Delta" Classes="accent" IsDefault="True"/>
                         <Button Command="{Binding ChooseResetCommand}" Content="Reset first"/>
                         <Button Command="{Binding ChooseCancelConflictCommand}" Content="Cancel" IsCancel="True"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Closing this tab (X, Ctrl+W, the Close Document menu item) while a run is in progress
+             would otherwise silently abandon it - see ScriptDatabasesDocumentViewModel.OnClose. -->
+        <Grid x:Name="CloseConfirmationOverlay" IsVisible="{Binding PendingCloseConfirmation}" Background="#80000000">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Scripting is still running" FontWeight="Bold" FontSize="16"/>
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Closing this tab will cancel the scripting run in progress. Close anyway?"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                        <Button Command="{Binding ConfirmCloseCommand}" Content="Cancel &amp; Close" Classes="accent"/>
+                        <Button x:Name="KeepWorkingButton" Command="{Binding KeepWorkingCommand}" Content="Keep Working" IsDefault="True" IsCancel="True"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

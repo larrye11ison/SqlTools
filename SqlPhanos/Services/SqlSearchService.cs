@@ -61,14 +61,19 @@ public class SqlSearchService
             ) def
         WHERE ao.is_ms_shipped = 0
             AND ao.type_desc IN (
-                'CHECK_CONSTRAINT'
-                ,'SQL_INLINE_TABLE_VALUED_FUNCTION'
+                'SQL_INLINE_TABLE_VALUED_FUNCTION'
                 ,'SQL_SCALAR_FUNCTION'
                 ,'SQL_STORED_PROCEDURE'
                 ,'SQL_TABLE_VALUED_FUNCTION'
                 ,'SQL_TRIGGER'
                 ,'USER_TABLE'
                 ,'VIEW'
+                ,'SEQUENCE_OBJECT'
+                ,'TABLE_TYPE'
+                ,'CLR_STORED_PROCEDURE'
+                ,'CLR_SCALAR_FUNCTION'
+                ,'CLR_TABLE_VALUED_FUNCTION'
+                ,'CLR_TRIGGER'
                 )
             AND (ao.NAME LIKE @objectNameSearch)
             AND (sch.NAME LIKE @objectSchemaSearch)
@@ -76,6 +81,35 @@ public class SqlSearchService
                 def.object_definition LIKE @objectDefinitionSearch
                 OR c.MatchingColumnCount > 0
                 );";
+
+    // UDTs (both CLR-backed and plain CREATE TYPE ... FROM <base type> aliases) live only in
+    // sys.types, not sys.objects - sys.types has no type_desc column of its own, so this can't just
+    // extend ObjectsQuery's IN list; it's a separate query, run alongside it and merged into the
+    // same result list. is_table_type = 0 excludes user-defined table types, which DO have a
+    // sys.objects row (type_desc = 'TABLE_TYPE') and are already covered by ObjectsQuery - without
+    // this exclusion they'd be listed twice. Deliberately ignores @objectDefinitionSearchParam______:
+    // these types have no body/definition to search, so a definition-text filter simply doesn't
+    // apply to them rather than hiding them entirely.
+    private const string UserDefinedTypesQuery = @"
+        DECLARE @objectNameSearch VARCHAR(max)
+            ,@objectSchemaSearch VARCHAR(max);
+
+        SET @objectNameSearch = '%' + ltrim(rtrim(isnull(@objectNameSearchParam______, ''))) + '%';
+        SET @objectSchemaSearch = '%' + ltrim(rtrim(isnull(@objectSchemaSearchParam______, ''))) + '%';
+
+        SELECT @@SERVERNAME AS server_name
+            ,cast(db_name() AS SYSNAME) AS db_name
+            ,CASE WHEN t.is_assembly_type = 1 THEN 'USER_DEFINED_TYPE' ELSE 'USER_DEFINED_DATA_TYPE' END AS type_desc
+            ,sch.NAME AS schema_name
+            ,t.NAME AS object_name
+            ,CAST(NULL AS SYSNAME) AS parent_object_name
+            ,CAST(0 AS BIT) AS is_encrypted
+        FROM sys.types t
+        LEFT OUTER JOIN sys.schemas sch ON sch.schema_id = t.schema_id
+        WHERE t.is_user_defined = 1
+            AND t.is_table_type = 0
+            AND (t.NAME LIKE @objectNameSearch)
+            AND (sch.NAME LIKE @objectSchemaSearch);";
 
     // Triggers are the only dependent-object relationship in sys.objects that hangs off a
     // simple parent_object_id, so tables and views are the only parent types handled today.
@@ -161,7 +195,7 @@ public class SqlSearchService
     // dates (used for Delta-mode change detection), which don't apply to a single interactively
     // opened object. Encrypted objects are decrypted via the read-only RC4/DAC technique
     // (EncryptedModuleDecryptor) only - never by executing an ALTER against the live object.
-    public async Task<string> ScriptObjectAsync(
+    public async Task<SingleObjectScriptResult> ScriptObjectAsync(
         string connectionString,
         SearchResultViewModel result,
         bool allowEncryptedModuleDecrypt = false,
@@ -207,7 +241,7 @@ public class SqlSearchService
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var database = server.Databases[result.DbName];
-                if (database == null) return "-- Database not found";
+                if (database == null) return new SingleObjectScriptResult("-- Database not found", null);
 
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -222,6 +256,7 @@ public class SqlSearchService
                         break;
 
                     case "SQL_STORED_PROCEDURE":
+                    case "CLR_STORED_PROCEDURE":
                         if (database.StoredProcedures.Contains(result.ObjectName, result.SchemaName))
                             urn = database.StoredProcedures[result.ObjectName, result.SchemaName].Urn;
                         break;
@@ -234,11 +269,34 @@ public class SqlSearchService
                     case "SQL_SCALAR_FUNCTION":
                     case "SQL_TABLE_VALUED_FUNCTION":
                     case "SQL_INLINE_TABLE_VALUED_FUNCTION":
+                    case "CLR_SCALAR_FUNCTION":
+                    case "CLR_TABLE_VALUED_FUNCTION":
                         if (database.UserDefinedFunctions.Contains(result.ObjectName, result.SchemaName))
                             urn = database.UserDefinedFunctions[result.ObjectName, result.SchemaName].Urn;
                         break;
 
+                    case "SEQUENCE_OBJECT":
+                        if (database.Sequences.Contains(result.ObjectName, result.SchemaName))
+                            urn = database.Sequences[result.ObjectName, result.SchemaName].Urn;
+                        break;
+
+                    case "TABLE_TYPE":
+                        if (database.UserDefinedTableTypes.Contains(result.ObjectName, result.SchemaName))
+                            urn = database.UserDefinedTableTypes[result.ObjectName, result.SchemaName].Urn;
+                        break;
+
+                    case "USER_DEFINED_TYPE":
+                        if (database.UserDefinedTypes.Contains(result.ObjectName, result.SchemaName))
+                            urn = database.UserDefinedTypes[result.ObjectName, result.SchemaName].Urn;
+                        break;
+
+                    case "USER_DEFINED_DATA_TYPE":
+                        if (database.UserDefinedDataTypes.Contains(result.ObjectName, result.SchemaName))
+                            urn = database.UserDefinedDataTypes[result.ObjectName, result.SchemaName].Urn;
+                        break;
+
                     case "SQL_TRIGGER":
+                    case "CLR_TRIGGER":
                         // DML triggers aren't in their own top-level SMO collection - they live
                         // under whichever table or view they're attached to. A trigger's schema
                         // always matches its parent object's schema (T-SQL requires this), so
@@ -266,7 +324,7 @@ public class SqlSearchService
 
                 if (urn is null)
                 {
-                    return notFoundMessage ?? "-- Object not found in SMO collections.";
+                    return new SingleObjectScriptResult(notFoundMessage ?? "-- Object not found in SMO collections.", null);
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -289,7 +347,7 @@ public class SqlSearchService
             }
             catch (Exception ex)
             {
-                return $"-- Error scripting object: {ex.Message}\r\n/*\r\n{ex}\r\n*/";
+                return new SingleObjectScriptResult($"-- Error scripting object: {ex.Message}\r\n/*\r\n{ex}\r\n*/", null);
             }
             finally
             {
@@ -319,6 +377,29 @@ public class SqlSearchService
                 command.Parameters.AddWithValue("@objectNameSearchParam______", objectName ?? "");
                 command.Parameters.AddWithValue("@objectSchemaSearchParam______", schemaName ?? "");
                 command.Parameters.AddWithValue("@objectDefinitionSearchParam______", definition ?? "");
+
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        results.Add(new SearchResultViewModel
+                        {
+                            ServerName = reader["server_name"].ToString() ?? "",
+                            DbName = reader["db_name"].ToString() ?? "",
+                            TypeDesc = reader["type_desc"].ToString() ?? "",
+                            SchemaName = reader["schema_name"].ToString() ?? "",
+                            ObjectName = reader["object_name"].ToString() ?? "",
+                            ParentFqName = reader["parent_object_name"] != DBNull.Value ? reader["parent_object_name"].ToString() ?? "" : "",
+                            IsEncrypted = (bool)reader["is_encrypted"]
+                        });
+                    }
+                }
+            }
+
+            using (var command = new SqlCommand(UserDefinedTypesQuery, connection))
+            {
+                command.Parameters.AddWithValue("@objectNameSearchParam______", objectName ?? "");
+                command.Parameters.AddWithValue("@objectSchemaSearchParam______", schemaName ?? "");
 
                 using (var reader = await command.ExecuteReaderAsync())
                 {

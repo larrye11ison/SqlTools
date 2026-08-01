@@ -22,7 +22,7 @@ public static class SingleObjectScriptingService
     /// string: resolving the Urn in the first place already required a connection, so this
     /// reuses it instead of opening a second one just to script what was already found.
     /// </summary>
-    public static string ScriptResolvedObject(
+    public static SingleObjectScriptResult ScriptResolvedObject(
         Server server,
         Urn urn,
         string objectName,
@@ -44,11 +44,13 @@ public static class SingleObjectScriptingService
             body.AppendLine("GO");
         }
 
+        var smoObject = server.GetSmoObject(urn);
+
         // ScriptingOptions.Permissions (set above via ScriptingOptionsFactory) doesn't actually
         // produce GRANT text for a single Urn-identified object - see
         // ObjectPermissionScriptBuilder's own doc comment for why - so permissions are
         // enumerated and appended separately here.
-        body.Append(ObjectPermissionScriptBuilder.BuildPermissionScript(server.GetSmoObject(urn)));
+        body.Append(ObjectPermissionScriptBuilder.BuildPermissionScript(smoObject));
 
         string header = ObjectScriptHeaderBuilder.Build(
             objectName,
@@ -56,7 +58,7 @@ public static class SingleObjectScriptingService
             databaseDisplayName,
             DateTimeOffset.Now);
 
-        return header + body;
+        return new SingleObjectScriptResult(header + body, ClrAssemblyExporter.TryGetClrAssemblyName(smoObject));
     }
 
     /// <summary>
@@ -70,7 +72,7 @@ public static class SingleObjectScriptingService
     /// ScriptDatabasesDocumentViewModel.ScriptOneDatabaseWithConsentAsync already does for the
     /// bulk path.
     /// </summary>
-    public static string ScriptEncryptedObject(
+    public static SingleObjectScriptResult ScriptEncryptedObject(
         string connectionString,
         string schema,
         string objectName,
@@ -94,6 +96,16 @@ public static class SingleObjectScriptingService
             databaseDisplayName,
             DateTimeOffset.Now);
 
-        return header + definition;
+        // WITH ENCRYPTION only applies to T-SQL modules with a text body - a CLR object can never
+        // reach this path, so there's nothing to detect here.
+        return new SingleObjectScriptResult(header + definition, ClrAssemblyName: null);
     }
 }
+
+/// <summary>
+/// <paramref name="ClrAssemblyName"/> is non-null exactly when the scripted object is CLR-backed
+/// (a stored proc/function/trigger with ImplementationType.SqlClr) - callers use it to fetch and
+/// decompile the assembly separately, since that's a distinct round trip from scripting the
+/// object's own thin "AS EXTERNAL NAME" wrapper.
+/// </summary>
+public sealed record SingleObjectScriptResult(string ScriptText, string? ClrAssemblyName);

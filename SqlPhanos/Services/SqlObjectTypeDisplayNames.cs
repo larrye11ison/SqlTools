@@ -38,6 +38,8 @@ public static class SqlObjectTypeDisplayNames
         ["SERVICE_QUEUE"] = "Service Broker Queue",
         ["PLAN_GUIDE"] = "Plan Guide",
         ["TABLE_TYPE"] = "UD Table Type",
+        ["USER_DEFINED_TYPE"] = "CLR Type",
+        ["USER_DEFINED_DATA_TYPE"] = "UD Data Type",
     };
 
     /// <summary>Returns the friendly label, or the raw type_desc unchanged if it isn't mapped.</summary>
