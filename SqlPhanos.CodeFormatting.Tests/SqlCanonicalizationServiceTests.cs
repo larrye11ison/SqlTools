@@ -2567,6 +2567,192 @@ public sealed class SqlCanonicalizationServiceTests
 		Assert.DoesNotContain("WHERE,", result.Text);
 	}
 
+	[Fact]
+	public void GrantWithMultiplePermissionsFormatsAsTwoLines()
+	{
+		// Regression test: GRANT's permission list reuses the exact same keyword tokens
+		// (SELECT/INSERT/UPDATE) that real DML statements use, and those tokens' own cases used to
+		// force query-shaped newlines and comma-splitting onto it - producing "GRANT\nINSERT,\n
+		// SELECT\n    ,\nUPDATE ON ..." instead of the two clean lines below.
+		var sql = "GRANT INSERT, SELECT, UPDATE ON [dbo].[A] TO [public];";
+		var expected = """
+			GRANT INSERT, SELECT, UPDATE
+			ON [dbo].[A] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void DenyWithSinglePermissionFormatsAsTwoLines()
+	{
+		var sql = "DENY SELECT ON [dbo].[A] TO [public];";
+		var expected = """
+			DENY SELECT
+			ON [dbo].[A] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantWithNoOnClauseBreaksBeforeTo()
+	{
+		// A database/server-level permission (e.g. CREATE TABLE) has no securable object, so there
+		// is no ON clause - TO itself starts the second line instead.
+		var sql = "GRANT CREATE TABLE TO [user1];";
+		var expected = """
+			GRANT CREATE TABLE
+			TO [user1];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantWithColumnListKeepsColumnsInlineOnFirstLine()
+	{
+		var sql = "GRANT SELECT (Col1, Col2) ON [dbo].[A] TO [public];";
+		var expected = """
+			GRANT SELECT (Col1, Col2)
+			ON [dbo].[A] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantWithMultiplePrincipalsStaysInlineOnSecondLine()
+	{
+		var sql = "GRANT SELECT ON [dbo].[A] TO [user1], [user2], [role1];";
+		var expected = """
+			GRANT SELECT
+			ON [dbo].[A] TO [user1], [user2], [role1];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantWithGrantOptionAndGrantorStaysInlineOnSecondLine()
+	{
+		var sql = "GRANT SELECT ON [dbo].[A] TO [public] WITH GRANT OPTION AS [dbo];";
+		var expected = """
+			GRANT SELECT
+			ON [dbo].[A] TO [public] WITH GRANT OPTION AS [dbo];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void RevokeWithGrantOptionForAndCascadeFormatsAsTwoLines()
+	{
+		// REVOKE's own extra syntax: a "GRANT OPTION FOR" prefix (still part of the first line, not
+		// a mid-statement WITH GRANT OPTION) and a trailing CASCADE/AS grantor on the second line,
+		// using FROM instead of TO to introduce the principal.
+		var sql = "REVOKE GRANT OPTION FOR SELECT ON [dbo].[A] FROM [public] CASCADE AS [dbo];";
+		var expected = """
+			REVOKE GRANT OPTION FOR SELECT
+			ON [dbo].[A] FROM [public] CASCADE AS [dbo];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void RevokeWithNoOnClauseBreaksBeforeFrom()
+	{
+		var sql = "REVOKE CREATE TABLE FROM [user1];";
+		var expected = """
+			REVOKE CREATE TABLE
+			FROM [user1];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantExecuteOnProcedureFormatsAsTwoLines()
+	{
+		// EXECUTE has its own case elsewhere (for real EXEC calls, setting inExecParams) that must
+		// not fire for "GRANT EXECUTE ON ...".
+		var sql = "GRANT EXECUTE ON [dbo].[Proc1] TO [public];";
+		var expected = """
+			GRANT EXECUTE
+			ON [dbo].[Proc1] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantAllPrivilegesFormatsAsTwoLines()
+	{
+		var sql = "GRANT ALL PRIVILEGES ON [dbo].[A] TO [public];";
+		var expected = """
+			GRANT ALL PRIVILEGES
+			ON [dbo].[A] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantLowercaseKeywordsAreCanonicalizedToUppercase()
+	{
+		var sql = "grant insert, select on [dbo].[a] to [public];";
+		var expected = """
+			GRANT INSERT, SELECT
+			ON [dbo].[a] TO [public];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void GrantWithLongPermissionListWrapsOnePerLine()
+	{
+		// Long enough to cross LongExpressionLineBreakThreshold - each permission after the first
+		// gets its own line instead of running past the width other long lists wrap at.
+		var sql = "GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES, EXECUTE, CONTROL, VIEW DEFINITION ON [dbo].[SomeVeryLongObjectNameHere] TO [SomeVeryLongPrincipalNameHere];";
+		var expected = """
+			GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES, EXECUTE, CONTROL,
+				VIEW DEFINITION
+			ON [dbo].[SomeVeryLongObjectNameHere] TO [SomeVeryLongPrincipalNameHere];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void MultipleGrantStatementsInOneBatchEachFormatIndependently()
+	{
+		var sql = "GRANT INSERT ON [dbo].[A] TO [public]; GRANT SELECT ON [dbo].[B] TO [user1];";
+		var expected = """
+			GRANT INSERT
+			ON [dbo].[A] TO [public];
+
+			GRANT SELECT
+			ON [dbo].[B] TO [user1];
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
+	[Fact]
+	public void AlterTableSwitchToIsUnaffectedByGrantToHandling()
+	{
+		// TO has no dedicated case outside a GRANT/DENY/REVOKE statement - this must keep working
+		// exactly as before (single line, no forced break) once TO gets its own case for GRANT's sake.
+		var sql = "ALTER TABLE dbo.t1 SWITCH TO dbo.t2;";
+		var expected = """
+			ALTER TABLE dbo.t1 SWITCH TO dbo.t2;
+			""";
+
+		RunFactTest(sql, expected);
+	}
+
 	private string NormalizeWhitespace(string input)
 	{
 		// Preserve comments and original SQL structure exactly; only normalize line endings.

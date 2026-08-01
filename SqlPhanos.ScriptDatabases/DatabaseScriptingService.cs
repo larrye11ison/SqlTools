@@ -393,7 +393,15 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
                 // Appended after reformatting/normalizing, not before: those transforms are
                 // built for the object's own DDL body, and GRANT/DENY statements have no
                 // auto-generated constraint names or formatting quirks for them to act on.
-                WriteRawScriptFile(context.WorkItem.OutputFile, text + permissionScript, headerRequest);
+                // The reformatter trims trailing whitespace off the very end of whatever text it's
+                // given - since text here ends in "...GO" with nothing after it, that strips the
+                // newline a plain "+" needs, gluing the next line straight onto "GO" (e.g.
+                // "GOGRANT EXECUTE ON ..."). TrimEnd + an explicit blank line restores the same
+                // separation every other batch boundary already has.
+                var combinedText = permissionScript.Length > 0
+                    ? text.TrimEnd() + Environment.NewLine + Environment.NewLine + permissionScript
+                    : text;
+                WriteRawScriptFile(context.WorkItem.OutputFile, combinedText, headerRequest);
             }
         }
         catch (Exception ex)

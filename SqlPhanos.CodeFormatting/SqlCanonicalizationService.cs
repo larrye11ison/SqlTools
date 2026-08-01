@@ -163,6 +163,21 @@ public sealed class SqlCanonicalizationService
 			// from triggering their normal "start a new DML statement" handling (pendingUpdateSetClause
 			// etc.), which would otherwise corrupt formatting of whatever follows.
 			var inInsteadOfClause = false;
+			// True from a statement-starting GRANT/REVOKE/DENY through that statement's end - its
+			// permission list (and REVOKE's "GRANT OPTION FOR" prefix) reuses the exact same keyword
+			// tokens (SELECT, INSERT, UPDATE, EXECUTE, CREATE, ALTER, TABLE, VIEW, ...) that real
+			// DML/DDL statements use, each of which has its own case elsewhere tuned for that real
+			// usage (forcing newlines, flipping inSelectColumnList/pendingInsertColumnList/
+			// inExecParams/etc.) - every one of those needs to recognize this context and fall back
+			// to plain glued-inline rendering instead.
+			var inSecurityStatement = false;
+			// True once ON, TO, or FROM (whichever appears first) has been seen - that keyword
+			// always starts the statement's second line (securable/principal clause); everything
+			// before it is the first line (GRANT/REVOKE/DENY plus its permission list).
+			var securityStatementPastPermissionList = false;
+			// True from TO/FROM through the next WITH/AS/CASCADE/semicolon - governs wrapping a long
+			// principal list the same way the permission list itself wraps.
+			var inSecurityStatementPrincipalList = false;
 			var betweenAndJustEmitted = false;
 			var inCreateObjectParameterList = false;
 			var createObjectParameterListDepth = -1;
@@ -187,6 +202,25 @@ public sealed class SqlCanonicalizationService
 			// bare CASE...END expression fragment with no enclosing WHERE at all, where CASE's old
 			// column-0 behavior was already correct and currentConditionIndent doesn't apply.
 			var inConditionClause = false;
+
+			// Renders whatever comes next inside a GRANT/DENY/REVOKE permission list (a permission
+			// name, or the column/principal list that follows one) either glued onto the current
+			// line with a single leading space (the common case), or - after the Comma case above
+			// wrapped a long list, leaving lineStart true - indented onto its own fresh continuation
+			// line. AppendSpaceIfNeeded alone can't tell these apart: it's a no-op at the start of a
+			// line, which glued the wrapped item onto column 0 with no indent at all.
+			void AppendSecurityStatementListItemLeadIn()
+			{
+				if (lineStart)
+				{
+					AppendIndent(result, indentLevel + 1);
+					lineStart = false;
+				}
+				else
+				{
+					AppendSpaceIfNeeded(result, lineStart);
+				}
+			}
 
 			// CASE/END need the same "are we inside an active WHERE/ON/HAVING condition" distinction
 			// that currentConditionIndent exists for for AND/OR - GetContentIndent alone has no way
@@ -256,6 +290,16 @@ public sealed class SqlCanonicalizationService
 				switch (token.TokenType)
 				{
 					case TSqlTokenType.Create:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// A database/server-level permission name, e.g. "GRANT CREATE TABLE TO ..."
+							// - not an actual CREATE statement.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						afterCreateObjectName = false;
@@ -263,6 +307,16 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Alter:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// A permission name, e.g. "GRANT ALTER ON ..." or "GRANT ALTER ANY LOGIN
+							// TO ..." - not an actual ALTER statement.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						var previousAlterIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 						var previousAlterType = previousAlterIndex >= 0 ? tokens[previousAlterIndex].TokenType : TSqlTokenType.None;
 						var nextAlterIndex = NextNonWhitespaceIndex(tokens, i + 1);
@@ -366,6 +420,16 @@ public sealed class SqlCanonicalizationService
 					case TSqlTokenType.Procedure:
 					case TSqlTokenType.Function:
 					case TSqlTokenType.View:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// A permission name, e.g. "GRANT CREATE PROCEDURE TO ..." or the plain
+							// "GRANT VIEW DEFINITION ON ... TO ..." - not an actual CREATE/object name.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
 						afterCreateObjectName = true;
@@ -393,6 +457,17 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Table:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// "GRANT CREATE TABLE TO ..." - a permission name, not an actual table
+							// reference, so this must not set afterCreateObjectName/etc. the way a real
+							// CREATE TABLE's TABLE keyword does below.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						var previousTableIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 						var previousTableType = previousTableIndex >= 0 ? tokens[previousTableIndex].TokenType : TSqlTokenType.None;
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
@@ -535,6 +610,15 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Select:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// A permission name, e.g. "GRANT SELECT, UPDATE ON ..." - not a query.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendLineIfNeeded(result, ref lineStart);
 						var previousSelectIndex = PreviousNonWhitespaceIndex(tokens, i - 1);
 						var previousSelectType = previousSelectIndex >= 0 ? tokens[previousSelectIndex].TokenType : TSqlTokenType.None;
@@ -571,9 +655,11 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Insert:
-						if (inInsteadOfClause)
+						if (inInsteadOfClause || (inSecurityStatement && !securityStatementPastPermissionList))
 						{
-							AppendSpaceIfNeeded(result, lineStart);
+							// The latter is a permission name, e.g. "GRANT INSERT, SELECT ON ..." -
+							// not an actual INSERT statement.
+							AppendSecurityStatementListItemLeadIn();
 							result.Append(token.Text.ToUpperInvariant());
 							previousWasStatementEnd = false;
 							break;
@@ -589,9 +675,11 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.Update:
-						if (inInsteadOfClause)
+						if (inInsteadOfClause || (inSecurityStatement && !securityStatementPastPermissionList))
 						{
-							AppendSpaceIfNeeded(result, lineStart);
+							// The latter is a permission name, e.g. "GRANT SELECT, UPDATE ON ..." -
+							// not an actual UPDATE statement.
+							AppendSecurityStatementListItemLeadIn();
 							result.Append(token.Text.ToUpperInvariant());
 							previousWasStatementEnd = false;
 							break;
@@ -624,6 +712,29 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.From:
+						if (inSecurityStatement)
+						{
+							// REVOKE's principal-list introducer, e.g. "REVOKE ... FROM [public]" -
+							// plays the same role TO plays for GRANT/DENY, not a query's FROM clause.
+							if (securityStatementPastPermissionList)
+							{
+								AppendSpaceIfNeeded(result, lineStart);
+							}
+							else
+							{
+								// No ON clause (a database/server-level REVOKE) - FROM itself starts
+								// the statement's second line.
+								AppendLineIfNeeded(result, ref lineStart);
+								AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+								securityStatementPastPermissionList = true;
+							}
+							result.Append(token.Text.ToUpperInvariant());
+							inSecurityStatementPrincipalList = true;
+							previousWasStatementEnd = false;
+							break;
+						}
+						goto case TSqlTokenType.Where;
+
 					case TSqlTokenType.Where:
 					case TSqlTokenType.Order:
 					case TSqlTokenType.Group:
@@ -674,6 +785,15 @@ public sealed class SqlCanonicalizationService
 
 					case TSqlTokenType.Execute:
 					case TSqlTokenType.Exec:
+						if (inSecurityStatement && !securityStatementPastPermissionList)
+						{
+							// "GRANT EXECUTE ON ..." - a permission name, not an EXEC call.
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						AppendLineIfNeeded(result, ref lineStart);
 						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
 						result.Append(token.Text.ToUpperInvariant());
@@ -888,6 +1008,19 @@ public sealed class SqlCanonicalizationService
 						break;
 
 					case TSqlTokenType.On:
+						if (inSecurityStatement)
+						{
+							// GRANT/DENY/REVOKE's securable-object clause, e.g. "GRANT ... ON
+							// [dbo].[A] ..." - always starts the statement's second line, never a
+							// JOIN's ON condition.
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							securityStatementPastPermissionList = true;
+							previousWasStatementEnd = false;
+							break;
+						}
+
 						// Resolve this ON against the most recently opened, still-unresolved JOIN
 						// at the current paren depth (T-SQL matches ON to JOIN LIFO, like matching
 						// brackets). Outside of an active JOIN chain (e.g. CREATE TABLE ... ON
@@ -952,6 +1085,60 @@ public sealed class SqlCanonicalizationService
 							result.Append(' ');
 						}
 
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.To:
+						if (!inSecurityStatement)
+						{
+							// e.g. "ALTER TABLE t1 SWITCH TO t2" - unrelated to GRANT/DENY/REVOKE.
+							goto default;
+						}
+
+						// GRANT/DENY's principal-list introducer.
+						if (securityStatementPastPermissionList)
+						{
+							// ON already started the second line - TO continues it inline.
+							AppendSpaceIfNeeded(result, lineStart);
+						}
+						else
+						{
+							// No ON clause (a database/server-level GRANT/DENY) - TO itself starts
+							// the statement's second line.
+							AppendLineIfNeeded(result, ref lineStart);
+							AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+							securityStatementPastPermissionList = true;
+						}
+						result.Append(token.Text.ToUpperInvariant());
+						inSecurityStatementPrincipalList = true;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Grant:
+						if (inSecurityStatement)
+						{
+							// Mid-statement, not the statement-starting keyword - "WITH GRANT OPTION"
+							// (GRANT/DENY) or "GRANT OPTION FOR ..." (REVOKE's own prefix, which sets
+							// inSecurityStatement itself via the REVOKE token that already ran).
+							AppendSpaceIfNeeded(result, lineStart);
+							result.Append(token.Text.ToUpperInvariant());
+							previousWasStatementEnd = false;
+							break;
+						}
+
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						inSecurityStatement = true;
+						previousWasStatementEnd = false;
+						break;
+
+					case TSqlTokenType.Revoke:
+					case TSqlTokenType.Deny:
+						AppendLineIfNeeded(result, ref lineStart);
+						AppendIndentIfNeeded(result, indentLevel, ref lineStart);
+						result.Append(token.Text.ToUpperInvariant());
+						inSecurityStatement = true;
 						previousWasStatementEnd = false;
 						break;
 
@@ -1188,6 +1375,25 @@ public sealed class SqlCanonicalizationService
 						}
 						else if (inDeclareStatement && parenthesisDepth > 0)
 						{
+						}
+						else if (inSecurityStatement && parenthesisDepth == 0 && (!securityStatementPastPermissionList || inSecurityStatementPrincipalList))
+						{
+							// A long GRANT/DENY/REVOKE permission list or principal list (no
+							// enclosing parens to anchor the generic wrap-if-long branch above) -
+							// wrap the same way, one item per line, once it stops fitting.
+							var currentLine = GetCurrentLineText(result).Trim();
+							var nextItemLength = GetNextSecurityStatementItemLength(tokens, i + 1);
+							if (nextItemLength > 0 && currentLine.Length + 1 + nextItemLength <= LongExpressionLineBreakThreshold)
+							{
+								result.Append(' ');
+								currentLineTokenLength++;
+							}
+							else
+							{
+								result.AppendLine();
+								lineStart = true;
+								currentLineTokenLength = 0;
+							}
 						}
 						else
 						{
@@ -2086,11 +2292,14 @@ public sealed class SqlCanonicalizationService
 					default:
 						// DELETE has no dedicated case (it's the only other DML keyword this
 						// clause can list, via IsKeyword below) - glue it inline like Insert/Update
-						// do rather than letting it take the normal indent-driven path.
-						if (inInsteadOfClause)
+						// do rather than letting it take the normal indent-driven path. The same
+						// applies to DELETE, REFERENCES, CONTROL, and any other permission name with
+						// no dedicated case of its own when it's part of a GRANT/DENY/REVOKE
+						// permission list (e.g. "GRANT REFERENCES, DELETE ON ...").
+						if (inInsteadOfClause || (inSecurityStatement && !securityStatementPastPermissionList && parenthesisDepth == 0))
 						{
-							AppendSpaceIfNeeded(result, lineStart);
-							result.Append(token.Text.ToUpperInvariant());
+							AppendSecurityStatementListItemLeadIn();
+							result.Append(IsKeyword(token.TokenType) ? token.Text.ToUpperInvariant() : token.Text);
 							previousWasStatementEnd = false;
 							break;
 						}
@@ -2149,6 +2358,9 @@ public sealed class SqlCanonicalizationService
 					alterTablePrimaryKeyListMultiColumn = false;
 					inConditionClause = false;
 					currentConditionIndent = indentLevel + 1;
+					inSecurityStatement = false;
+					securityStatementPastPermissionList = false;
+					inSecurityStatementPrincipalList = false;
 				}
 			}
 
@@ -3292,6 +3504,41 @@ public sealed class SqlCanonicalizationService
 		return length;
 	}
 
+	// Like GetNextTopLevelArgumentLength, but for a GRANT/DENY/REVOKE permission or principal list -
+	// which, unlike a function-call argument list, has no enclosing ")" to naturally bound the
+	// measurement, so it must stop at whatever keyword ends that list instead (a further comma, the
+	// clause that follows the list, or the statement's end).
+	private static int GetNextSecurityStatementItemLength(IList<TSqlParserToken> tokens, int startIndex)
+	{
+		var length = 0;
+		var seenNonWhitespace = false;
+
+		for (var i = startIndex; i < tokens.Count; i++)
+		{
+			var token = tokens[i];
+			if (token.TokenType is TSqlTokenType.Comma or TSqlTokenType.On or TSqlTokenType.To or TSqlTokenType.From
+				or TSqlTokenType.With or TSqlTokenType.As or TSqlTokenType.Cascade or TSqlTokenType.Semicolon
+				or TSqlTokenType.LeftParenthesis or TSqlTokenType.EndOfFile)
+			{
+				break;
+			}
+
+			if (token.TokenType == TSqlTokenType.WhiteSpace)
+			{
+				if (seenNonWhitespace)
+				{
+					length++;
+				}
+				continue;
+			}
+
+			length += token.Text.Length;
+			seenNonWhitespace = true;
+		}
+
+		return length;
+	}
+
 	private static int GetNextTopLevelArgumentLength(IList<TSqlParserToken> tokens, int startIndex, int currentParenthesisDepth)
 	{
 		var depth = currentParenthesisDepth;
@@ -3587,7 +3834,14 @@ public sealed class SqlCanonicalizationService
 			TSqlTokenType.Execute or
 			TSqlTokenType.Exec or
 			TSqlTokenType.Coalesce or
-			TSqlTokenType.NullIf => true,
+			TSqlTokenType.NullIf or
+			TSqlTokenType.Grant or
+			TSqlTokenType.Revoke or
+			TSqlTokenType.Deny or
+			TSqlTokenType.To or
+			TSqlTokenType.Cascade or
+			TSqlTokenType.Option or
+			TSqlTokenType.For => true,
 			_ => false
 		};
 	}
