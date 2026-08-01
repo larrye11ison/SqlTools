@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Management.Common;
+using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Smo;
 
 namespace SqlPhanos.ScriptDatabases;
@@ -41,6 +42,7 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
             request.CancellationToken.ThrowIfCancellationRequested();
 
             List<ObjectWorkItem> workItems = BuildWorkItems(loaded.Objects, outputDirectory);
+            workItems.AddRange(BuildTriggerWorkItems(loaded.Triggers, outputDirectory));
 
             // Release the catalogue SMO session before scripting so DAC decrypt is not blocked
             // by an existing open user-database connection (SQL error 924).
@@ -77,6 +79,7 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
                 DataTable objects = database.EnumObjects(SqlObjectFilters.GetScriptedObjectTypes());
                 ObjectCatalogue catalogue = ObjectCatalogue.LoadFromDatabase(database);
                 List<ObjectWorkItem> workItems = BuildWorkItems(objects, outputPath: "");
+                workItems.AddRange(BuildTriggerWorkItems(EnumerateTriggers(database), outputPath: ""));
                 return workItems.Count(wi => catalogue.IsEncrypted(wi.Schema, wi.ObjectName));
             }
             finally
@@ -95,7 +98,81 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
 
         DataTable objects = database.EnumObjects(SqlObjectFilters.GetScriptedObjectTypes());
         ObjectCatalogue catalogue = ObjectCatalogue.LoadFromDatabase(database);
-        return new LoadedDatabaseContext(server, objects, catalogue);
+        List<TriggerReference> triggers = EnumerateTriggers(database);
+        return new LoadedDatabaseContext(server, objects, catalogue, triggers);
+    }
+
+    // DatabaseObjectTypes (the flags enum EnumObjects takes) has no Trigger value at all - SMO
+    // simply doesn't model triggers as independently-enumerable database objects the way
+    // tables/procs/views are, only as children of their parent table/view's own Triggers
+    // collection. Queried directly against sys.triggers instead (same "go around SMO" pattern as
+    // ObjectCatalogue's own query), then each one's Urn is resolved via SMO's Tables/Views
+    // collections - mirrors SqlSearchService's identical SQL_TRIGGER lookup for the single-object
+    // path. parent_class = 1 is DML triggers (table/view-scoped) - excludes database-level
+    // DDL/logon triggers (parent_class = 0), which aren't part of "a table's own triggers" and
+    // have no single Table/View to attribute an output file to.
+    private static List<TriggerReference> EnumerateTriggers(Database database)
+    {
+        DataSet results = database.ExecuteWithResults(
+            """
+            SELECT
+                OBJECT_SCHEMA_NAME(tr.parent_id) AS ParentSchema,
+                OBJECT_NAME(tr.parent_id) AS ParentName,
+                tr.name AS TriggerName
+            FROM sys.triggers tr
+            INNER JOIN sys.objects po ON po.object_id = tr.parent_id
+            WHERE tr.is_ms_shipped = 0
+                AND tr.parent_class = 1;
+            """);
+
+        var triggers = new List<TriggerReference>();
+        if (results.Tables.Count == 0)
+        {
+            return triggers;
+        }
+
+        foreach (DataRow row in results.Tables[0].Rows)
+        {
+            var parentSchema = row["ParentSchema"] as string ?? string.Empty;
+            var parentName = row["ParentName"] as string ?? string.Empty;
+            var triggerName = row["TriggerName"] as string ?? string.Empty;
+            if (string.IsNullOrEmpty(triggerName) || !SqlObjectFilters.IsUserObject(parentSchema, parentName))
+            {
+                continue;
+            }
+
+            // A trigger's own schema always matches its parent's (T-SQL requires this).
+            Urn? urn = null;
+            if (database.Tables.Contains(parentName, parentSchema) &&
+                database.Tables[parentName, parentSchema].Triggers.Contains(triggerName))
+            {
+                urn = database.Tables[parentName, parentSchema].Triggers[triggerName].Urn;
+            }
+            else if (database.Views.Contains(parentName, parentSchema) &&
+                     database.Views[parentName, parentSchema].Triggers.Contains(triggerName))
+            {
+                urn = database.Views[parentName, parentSchema].Triggers[triggerName].Urn;
+            }
+
+            if (urn is not null)
+            {
+                triggers.Add(new TriggerReference(urn.ToString() ?? "", parentSchema, triggerName));
+            }
+        }
+
+        return triggers;
+    }
+
+    private static List<ObjectWorkItem> BuildTriggerWorkItems(List<TriggerReference> triggers, string outputPath)
+    {
+        return triggers
+            .Select(t => new ObjectWorkItem(
+                t.Urn,
+                t.Schema,
+                t.TriggerName,
+                "Trigger",
+                BuildOutputFilePath(outputPath, t.Schema, t.TriggerName, "Trigger")))
+            .ToList();
     }
 
     /// <summary>
@@ -591,12 +668,14 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
 
     private static Scripter CreateScripter(Server server)
     {
-        // includeTriggersInTableScript: true - there's no separate Trigger entry in
-        // SqlObjectFilters.GetScriptedObjectTypes(), so a table's triggers only ever appear at
-        // all if embedded in the table's own script here.
+        // includeTriggersInTableScript: false - triggers get their own standalone work items now
+        // (see EnumerateTriggers/BuildTriggerWorkItems), matching the single-object path's own
+        // "triggers are their own script, not folded into their table's" behavior. Leaving this
+        // true would script every trigger twice: once embedded in its table's script, once again
+        // as its own standalone file.
         return new Scripter(server)
         {
-            Options = ScriptingOptionsFactory.Create(includeTriggersInTableScript: true)
+            Options = ScriptingOptionsFactory.Create(includeTriggersInTableScript: false)
         };
     }
 
@@ -638,7 +717,10 @@ public sealed class DatabaseScriptingService : IDatabaseScriptingService
     private sealed record LoadedDatabaseContext(
         Server Server,
         DataTable Objects,
-        ObjectCatalogue Catalogue);
+        ObjectCatalogue Catalogue,
+        List<TriggerReference> Triggers);
+
+    private sealed record TriggerReference(string Urn, string Schema, string TriggerName);
 
     private sealed record ObjectHeaderRequest(
         string ObjectName,
