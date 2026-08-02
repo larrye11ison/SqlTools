@@ -6,7 +6,7 @@ A Windows desktop app (built on Avalonia UI, .NET 10) for searching, browsing, s
 
 SqlPhanos started as a focused "find the object I'm looking for" tool. It's grown into a much broader SQL Server workbench: live object scripting with dependent-object discovery, encrypted-object decryption, CLR object decompilation, whole-database bulk export with delta detection, and query-to-Excel export — all built around a ScriptDom-based SQL formatter with a round-trip safety net that refuses to hand you corrupted output.
 
-<!-- SCREENSHOT: Main window — connection panel + search results grid + an open script tab, showing the overall layout -->
+![SqlPhanos main window with connection search, object results, and an open script](docs/images/main.png)
 
 ## Why does this exist?
 
@@ -24,8 +24,6 @@ SqlPhanos does that search across every database on a server at once, then keeps
 * Client-side filtering on top of results: a general filter box plus dedicated Name/Schema/DB/Type filter boxes, with `!` to negate a term.
 * Two results views — a card list or a full sortable/resizable data grid — toggle with `Ctrl+R`.
 
-<!-- SCREENSHOT: Search panel with a set of results in the data grid view, filter boxes visible -->
-
 ### Script viewing
 
 * Click "Script" to script an object live from the server into its own tab, with cancel support and a refresh button.
@@ -35,7 +33,13 @@ SqlPhanos does that search across every database on a server at once, then keeps
 * **Encrypted object support** — `WITH ENCRYPTION` objects can be decrypted in place (read-only, via a Dedicated Administrator Connection) after an explicit consent prompt; nothing is altered on the server.
 * **CLR object support** — CLR-backed procs/functions/triggers show both their thin T-SQL wrapper and a decompiled C# view of the actual implementation, with a "Save As DLL..." export.
 
-<!-- SCREENSHOT: A scripted object tab showing Original/Reformatted toggle and the dependent-objects button strip -->
+![Original SQL Server object script](docs/images/original.png)
+
+![Reformatted SQL Server object script](docs/images/reformatted.png)
+
+![CLR procedure with its decompiled implementation](docs/images/clr-procedure.png)
+
+![Clickable referenced object in a scripted procedure](docs/images/scripting-dependent-object.png)
 
 ### Script Databases (bulk export)
 
@@ -50,17 +54,18 @@ Export every object in one or more databases to individual `.sql` files on disk:
 * CLR assemblies backing scripted objects are exported once each, as both `.dll` and decompiled `.cs`.
 * A live in-tab warnings list surfaces any object where the formatter's safety check rejected its own output — with a "Copy All" button for bug reports.
 
-<!-- SCREENSHOT: Script Databases tab mid-run, showing per-database progress bars and the database checklist -->
+![Script Databases export in progress](docs/images/script-entire-database.png)
 
 ### New Query (QueryXLerator)
 
-An ad-hoc query tab, powered by the SqlPhanos.QueryXLerator engine:
+An ad-hoc query tab focused on writing results to XLSX files that are intelligently formatted based on
+SQL Server datatypes.
 
 * Free-form SQL editor against the selected connection, with the same reformat button (`Ctrl+M`) as the code viewer.
 * **Execute** runs the query and writes every result set straight to an **XLSX workbook** — one worksheet per result set — with a configurable table style.
 * Column header suffixes control the output: `/sum`, `/average`, etc. add a totals-row aggregate; `/$` and `/%` apply currency/percent formatting; a column named `__tabname__` sets the worksheet's tab name instead of being written as data.
 
-<!-- SCREENSHOT: A New Query tab with results and the resulting XLSX file's formatting -->
+![QueryXLerator ad-hoc SQL query](docs/images/ad-hoc-query-xlerator.png)
 
 ### Other
 
