@@ -181,6 +181,14 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     [ObservableProperty]
     private string _statusMessage = "";
 
+    // Shown in the scripting-in-progress banner. Scripting itself is fast (a couple hundred
+    // milliseconds); reference resolution (LoadReferencesAsync - making other objects navigable)
+    // is what actually takes seconds, since it queries the server to check each candidate
+    // reference against the catalog. Distinguishing the two phases here so the banner doesn't
+    // just sit on "Scripting..." for the entire wait.
+    [ObservableProperty]
+    private string _scriptingStatusText = "Scripting...";
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsContentInteractive))]
     private bool _pendingEncryptedConsent;
@@ -240,6 +248,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         _cts = new CancellationTokenSource();
         _operationCompletionTcs = new TaskCompletionSource();
+        ScriptingStatusText = "Scripting...";
         SetReferences(Array.Empty<SqlDocumentReference>(), Array.Empty<SqlDocumentReference>());
         SetDependentObjects(Array.Empty<SearchResultViewModel>());
         try
@@ -255,6 +264,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             FormattingSafetyCheckFailed = !formatResult.SafetyCheckPassed;
             PendingFormattingSafetyWarning = FormattingSafetyCheckFailed;
 
+            ScriptingStatusText = "Gathering dependencies...";
             try
             {
                 await LoadReferencesAsync(script, formatResult.Text, _cts.Token);
@@ -777,6 +787,16 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
         var doc = new SqlDocumentViewModel(reference.Target, _connectionString, _searchService);
         WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+    }
+
+    [RelayCommand]
+    private void ExploreDependencies()
+    {
+        if (_sourceResult is not null)
+        {
+            WeakReferenceMessenger.Default.Send(
+                new ExploreDependenciesRequestMessage(_sourceResult));
+        }
     }
 
     [RelayCommand]

@@ -18,11 +18,14 @@ public sealed class ConnectionProfileStoreService
 	private readonly string _filePath;
 
 	public ConnectionProfileStoreService()
+		: this(Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+			"SqlPhanos",
+			"connections.json"))
 	{
-		var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-		var directoryPath = Path.Combine(appDataPath, "SqlPhanos");
-		_filePath = Path.Combine(directoryPath, "connections.json");
 	}
+
+	internal ConnectionProfileStoreService(string filePath) => _filePath = filePath;
 
 	public IReadOnlyList<SqlConnectionViewModel> LoadConnections()
 	{
@@ -32,10 +35,28 @@ public sealed class ConnectionProfileStoreService
 			return Array.Empty<SqlConnectionViewModel>();
 		}
 
+		var addedStableIds = false;
+		foreach (var connection in store.Connections)
+		{
+			if (connection.Id != Guid.Empty)
+			{
+				continue;
+			}
+
+			connection.Id = Guid.NewGuid();
+			addedStableIds = true;
+		}
+
+		if (addedStableIds)
+		{
+			WriteStore(store);
+		}
+
 		return store.Connections
 			.Where(connection => !string.IsNullOrWhiteSpace(connection.ServerAndInstance))
 			.Select(connection => new SqlConnectionViewModel
 			{
+				ProfileId = connection.Id,
 				ServerAndInstance = connection.ServerAndInstance,
 				UseWindowsAuth = connection.UseWindowsAuth,
 				UserName = connection.UserName,
@@ -54,6 +75,7 @@ public sealed class ConnectionProfileStoreService
 			.Where(connection => !string.IsNullOrWhiteSpace(connection.ServerAndInstance))
 			.Select(connection => new ConnectionProfile
 			{
+				Id = connection.ProfileId,
 				ServerAndInstance = connection.ServerAndInstance,
 				UseWindowsAuth = connection.UseWindowsAuth,
 				UserName = connection.UserName,

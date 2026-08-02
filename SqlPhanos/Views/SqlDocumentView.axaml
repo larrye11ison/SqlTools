@@ -49,7 +49,7 @@
                 BorderThickness="0,0,0,1"
                 Padding="12,8">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBlock Text="Scripting..." VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ScriptingStatusText}" VerticalAlignment="Center"/>
                 <Button Command="{Binding CancelScriptingCommand}" Content="Cancel"/>
             </StackPanel>
         </Border>
@@ -84,6 +84,10 @@
                 <Button Command="{Binding RefreshCommand}"
                         Content="Refresh"
                         ToolTip.Tip="Re-script this object from the server"/>
+
+                <Button Command="{Binding ExploreDependenciesCommand}"
+                        Content="Dependencies"
+                        ToolTip.Tip="Explore objects used by or dependent on this object"/>
             </StackPanel>
         </Border>
 

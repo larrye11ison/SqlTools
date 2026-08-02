@@ -66,11 +66,18 @@
                 <DataGridTemplateColumn Header="">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate DataType="vm:SearchResultViewModel">
-                            <Button Content="Script"
-                                    Command="{Binding ((vm:SearchResultsGridViewModel)DataContext).SearchResults.ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}"
-                                    Padding="8,3"
-                                    FontSize="12"/>
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <Button Content="Script"
+                                        Command="{Binding ((vm:SearchResultsGridViewModel)DataContext).SearchResults.ScriptObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="8,3"
+                                        FontSize="12"/>
+                                <Button Content="Dependencies"
+                                        Command="{Binding ((vm:SearchResultsGridViewModel)DataContext).SearchResults.ExploreDependenciesCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="8,3"
+                                        FontSize="12"/>
+                            </StackPanel>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>

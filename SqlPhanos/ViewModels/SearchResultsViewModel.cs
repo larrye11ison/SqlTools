@@ -101,6 +101,17 @@ public partial class SearchResultsViewModel : Tool, IRecipient<SearchResultsMess
         await Task.CompletedTask;
     }
 
+    [RelayCommand]
+    private void ExploreDependencies(SearchResultViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        WeakReferenceMessenger.Default.Send(new ExploreDependenciesRequestMessage(item));
+    }
+
     private void UpdateFilteredResults()
     {
         var filtered = _allResults.Where(item =>

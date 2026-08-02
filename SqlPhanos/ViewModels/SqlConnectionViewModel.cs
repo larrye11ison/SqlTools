@@ -1,3 +1,4 @@
+using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Data.SqlClient;
 
@@ -5,6 +6,8 @@ namespace SqlPhanos.ViewModels;
 
 public partial class SqlConnectionViewModel : ObservableObject
 {
+    public Guid ProfileId { get; init; } = Guid.NewGuid();
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsUsingWindowsAuth))]
     private string _password = "";
