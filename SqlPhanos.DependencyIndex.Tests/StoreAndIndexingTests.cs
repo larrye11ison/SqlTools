@@ -182,6 +182,37 @@ public sealed class StoreAndIndexingTests
     }
 
     [Fact]
+    public async Task StructuralReferenceToUncapturedObjectIdIsUnresolvedNotFatal()
+    {
+        // Regression test: sys.foreign_keys/parent_object_id/sys.types and sys.objects are read
+        // via separate queries against a live connection, not one consistent snapshot. On a busy
+        // production database that drift can leave a structural fact pointing at an object_id
+        // this scan never captured - this must degrade to an unresolved edge, not crash and
+        // discard the whole database's analysis (see Structural()'s original unchecked
+        // catalog.ByIdentity[...] indexer).
+        await using var index = await TestIndex.CreateAsync();
+        var database = new CatalogDatabase(5, "MainDb", null, "ONLINE", true);
+        var objects = new[]
+        {
+            TestIndex.Object(1, "dbo", "TableA", "USER_TABLE", null),
+        };
+        var databaseSnapshot = new DatabaseCatalogSnapshot(database, objects,
+            [new CatalogForeignKey(1, 999, "FK_TableA_Missing")], [], [], ScanOutcome.Succeeded);
+
+        var result = await index.Builder.BuildAsync(TestIndex.Snapshot(databases: [databaseSnapshot]),
+            new IndexBuildOptions(EncryptedModuleDecrypt: EncryptedModuleDecryptMode.Skip));
+
+        Assert.Equal(ScanOutcome.Succeeded, result.Outcome);
+        var table = (await index.Graph.SearchObjectsAsync("TableA", 10)).Single(item => item.Name == "TableA");
+        var graph = await index.Graph.GetDirectAsync(table.ObjectKey, GraphDirection.Uses,
+            new GraphFilter(IncludeDriDependencies: true));
+        var edge = Assert.Single(graph.Edges);
+        Assert.Equal(ResolutionStatus.NotFound, edge.Edge.ResolutionStatus);
+        Assert.Null(edge.Edge.TargetObjectKey);
+        Assert.Contains("999", edge.Edge.TargetObjectName);
+    }
+
+    [Fact]
     public async Task CatalogStructuralFactsAndCoverageRemainVisible()
     {
         await using var index = await TestIndex.CreateAsync();
