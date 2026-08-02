@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace SqlPhanos.ViewModels
 {
-	public partial class SearchViewModel : Tool, IRecipient<ScriptObjectRequestMessage>
+	public partial class SearchViewModel : Tool, IRecipient<ScriptObjectRequestMessage>, IRecipient<ExploreDependenciesRequestMessage>
 	{
 		private readonly SqlSearchService _searchService = new();
 		private readonly ConnectionProfileStoreService _connectionProfileStoreService = new();
@@ -92,6 +92,7 @@ namespace SqlPhanos.ViewModels
 
 			LoadConnections();
 			WeakReferenceMessenger.Default.Register<ScriptObjectRequestMessage>(this);
+			WeakReferenceMessenger.Default.Register<ExploreDependenciesRequestMessage>(this);
 		}
 
 		public void Receive(ScriptObjectRequestMessage message)
@@ -106,6 +107,20 @@ namespace SqlPhanos.ViewModels
 			var doc = new SqlDocumentViewModel(result, SelectedConnection.ConnectionString, _searchService);
 			WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
 			PublishStatus($"Scripting {result.SchemaName}.{result.ObjectName}...");
+		}
+
+		public void Receive(ExploreDependenciesRequestMessage message)
+		{
+			if (SelectedConnection == null)
+			{
+				PublishStatus("Select a connection before exploring dependencies.");
+				return;
+			}
+
+			var result = message.Value;
+			var doc = new DependencyExplorerDocumentViewModel(result, SelectedConnection, _searchService);
+			WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
+			PublishStatus($"Exploring dependencies for {result.SchemaName}.{result.ObjectName}...");
 		}
 
 		[RelayCommand]
@@ -160,6 +175,7 @@ namespace SqlPhanos.ViewModels
 
 			EditingConnection = new SqlConnectionViewModel
 			{
+				ProfileId = SelectedConnection.ProfileId,
 				ServerAndInstance = SelectedConnection.ServerAndInstance,
 				UseWindowsAuth = SelectedConnection.UseWindowsAuth,
 				UserName = SelectedConnection.UserName,

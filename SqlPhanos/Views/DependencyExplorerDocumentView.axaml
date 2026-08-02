@@ -1,0 +1,262 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:SqlPhanos.ViewModels"
+             xmlns:views="using:SqlPhanos.Views"
+             mc:Ignorable="d"
+             d:DesignWidth="1200"
+             d:DesignHeight="760"
+             x:Class="SqlPhanos.Views.DependencyExplorerDocumentView"
+             x:DataType="vm:DependencyExplorerDocumentViewModel">
+
+    <Design.DataContext>
+        <vm:DependencyExplorerDocumentViewModel/>
+    </Design.DataContext>
+
+    <Grid>
+    <DockPanel IsEnabled="{Binding !PendingEncryptedConsent}">
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemAccentColor}"
+                Padding="10,7">
+            <!-- WrapPanel rather than a fixed-column Grid: this toolbar has grown too many
+                 controls to fit one row at moderate widths, and a WrapPanel naturally drops
+                 later items onto additional rows instead of clipping/overflowing. Each control
+                 (or logical group) carries its own right/bottom margin in place of the Grid's
+                 ColumnSpacing, since WrapPanel has no equivalent spacing property. -->
+            <WrapPanel Orientation="Horizontal">
+                <Button Content="Build / Refresh Index"
+                        Command="{Binding BuildIndexCommand}"
+                        Margin="0,0,8,6"
+                        ToolTip.Tip="Incrementally update the index - only re-analyzes objects whose definition changed since the last scan, and only replaces their dependency edges. Use this for routine refreshes."/>
+                <Button Content="Full Rebuild"
+                        Command="{Binding FullRebuildCommand}"
+                        Margin="0,0,8,6"
+                        ToolTip.Tip="Re-analyze every object and rebuild all dependency edges from scratch, ignoring the last scan. Slower than a refresh, but useful to recover from a suspect or stale index."/>
+                <Button Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        IsEnabled="{Binding CanCancel}"
+                        Margin="0,0,16,6"/>
+
+                <StackPanel Orientation="Horizontal"
+                            Spacing="5"
+                            VerticalAlignment="Center"
+                            Margin="0,0,16,6">
+                    <TextBlock Text="Direction:" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding Directions}"
+                              SelectedItem="{Binding SelectedDirection}"
+                              MinWidth="100"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal"
+                            Spacing="5"
+                            VerticalAlignment="Center"
+                            Margin="0,0,16,6">
+                    <TextBlock Text="Depth:" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding DepthOptions}"
+                              SelectedItem="{Binding MaxDepth}"
+                              Width="64"/>
+                    <TextBlock Text="Limit:" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding NodeLimitOptions}"
+                              SelectedItem="{Binding NodeLimit}"
+                              Width="82"/>
+                </StackPanel>
+
+                <CheckBox Content="Include DRI dependencies"
+                          IsChecked="{Binding IncludeDriDependencies}"
+                          VerticalAlignment="Center"
+                          Margin="0,0,16,6"
+                          ToolTip.Tip="When unchecked (default), hides foreign key constraints and CHECK/DEFAULT constraint objects from the graph and list - these are database-enforced integrity rules, not code-level usage. Triggers, synonyms, and type references are always shown regardless of this setting."/>
+
+                <TextBox Text="{Binding FilterText}"
+                         PlaceholderText="Filter visible objects..."
+                         Width="220"
+                         Margin="0,0,8,6"/>
+                <Button Content="Reload Graph"
+                        Command="{Binding RefreshGraphCommand}"
+                        Margin="0,0,0,6"/>
+            </WrapPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="10,6">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBox Text="{Binding Status}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             Padding="0"
+                             MaxHeight="90"/>
+                    <TextBlock Text="{Binding FreshnessSummary}" FontSize="11" Opacity="0.75"/>
+                    <TextBlock Text="{Binding CoverageSummary}" FontSize="11" Opacity="0.85" TextWrapping="Wrap"/>
+                </StackPanel>
+                <ProgressBar Grid.Column="1"
+                             Width="160"
+                             IsIndeterminate="True"
+                             IsVisible="{Binding IsBusy}"
+                             VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="330,6,*" RowDefinitions="*,Auto">
+            <TabControl Grid.Column="0" Grid.Row="0">
+                <TabItem Header="Objects">
+                    <ListBox x:Name="ObjectList"
+                             ItemsSource="{Binding Nodes}"
+                             SelectedItem="{Binding SelectedNode}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:DependencyGraphNodeViewModel">
+                                <Grid ColumnDefinitions="Auto,*"
+                                      RowDefinitions="Auto,Auto"
+                                      Margin="3"
+                                      ColumnSpacing="7"
+                                      RowSpacing="3"
+                                      ToolTip.Tip="{Binding TooltipText}">
+                                    <!-- Three mutually exclusive indicator bars rather than one
+                                         color bound through a converter, so the color mapping
+                                         stays plain XAML - see DependencyGraphNodeViewModel's
+                                         ShowUnresolvedIndicator/ShowCautionIndicator/IsNormalStatus. -->
+                                    <Border Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
+                                            Width="7"
+                                            CornerRadius="3"
+                                            Background="#DC3545"
+                                            IsVisible="{Binding ShowUnresolvedIndicator}"/>
+                                    <Border Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
+                                            Width="7"
+                                            CornerRadius="3"
+                                            Background="#D97706"
+                                            IsVisible="{Binding ShowCautionIndicator}"/>
+                                    <Border Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
+                                            Width="7"
+                                            CornerRadius="3"
+                                            Background="{DynamicResource SystemAccentColor}"
+                                            IsVisible="{Binding IsNormalStatus}"/>
+                                    <StackPanel Grid.Column="1" Grid.Row="0">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Subtitle}"
+                                                   FontSize="11"
+                                                   Opacity="0.7"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Grid.Row="1"
+                                                Orientation="Horizontal"
+                                                Spacing="4">
+                                        <Button Content="Script"
+                                                FontSize="10"
+                                                Padding="5,2"
+                                                IsEnabled="{Binding HasIndexedObject}"
+                                                ToolTip.Tip="Script this object into a new tab"
+                                                Command="{Binding ((vm:DependencyExplorerDocumentViewModel)DataContext).OpenNodeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                        <Button Content="Dependencies"
+                                                FontSize="10"
+                                                Padding="5,2"
+                                                IsEnabled="{Binding HasIndexedObject}"
+                                                ToolTip.Tip="Open a new Dependencies tab for this object"
+                                                Command="{Binding ((vm:DependencyExplorerDocumentViewModel)DataContext).OpenNodeDependenciesCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </TabItem>
+
+                <TabItem Header="References">
+                    <ListBox ItemsSource="{Binding Edges}"
+                             SelectedItem="{Binding SelectedEdge}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:DependencyGraphEdgeViewModel">
+                                <StackPanel Margin="4,3">
+                                    <TextBlock Text="{Binding DisplayText}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding StatusText}"
+                                               FontSize="11"
+                                               Opacity="0.7"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </TabItem>
+            </TabControl>
+
+            <GridSplitter Grid.Column="1"
+                          Grid.RowSpan="2"
+                          Width="6"
+                          ResizeDirection="Columns"/>
+
+            <views:DependencyGraphControl x:Name="Graph"
+                                          Grid.Column="2"
+                                          Grid.Row="0"
+                                          Nodes="{Binding Nodes}"
+                                          Edges="{Binding Edges}"
+                                          SelectedNode="{Binding SelectedNode, Mode=TwoWay}"/>
+
+            <Border Grid.Column="0"
+                    Grid.ColumnSpan="3"
+                    Grid.Row="1"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="0,1,0,0"
+                    Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                    Padding="10,6">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{Binding SelectedNode.QualifiedName}"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding SelectedEdge.DisplayText}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Open Selected Object"
+                            Command="{Binding OpenNodeCommand}"
+                            CommandParameter="{Binding SelectedNode}"/>
+                    <Button Grid.Column="2"
+                            Content="Open Reference Source"
+                            Command="{Binding OpenEdgeSourceCommand}"
+                            CommandParameter="{Binding SelectedEdge}"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </DockPanel>
+
+    <!-- Encrypted-module decrypt consent overlay - a real security-relevant gate (opens a DAC
+         connection, requires sysadmin), shown in-tab rather than as a modal dialog. Mirrors
+         SqlDocumentView's identical overlay for the single-object scripting path. Answering
+         once is remembered for this connection for the rest of the app session (never persisted
+         to disk) - see EncryptedDecryptConsentSessionStore. -->
+    <Grid x:Name="EncryptedConsentOverlay" IsVisible="{Binding PendingEncryptedConsent}" Background="#80000000">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="20"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MaxWidth="440">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Encrypted objects detected" FontWeight="Bold" FontSize="16"/>
+                <TextBlock TextWrapping="Wrap">
+                    <Run Text="{Binding PendingEncryptedObjectName}"/>
+                    <Run Text=" has "/>
+                    <Run Text="{Binding PendingEncryptedCount}"/>
+                    <Run Text=" encrypted (WITH ENCRYPTION) object(s) that need dependency analysis. Decrypting requires opening a Dedicated Administrator Connection (DAC / ADMIN:) and requires sysadmin (or equivalent) - for remote instances, 'remote admin connections' must be enabled. Nothing is altered or dropped on the server. Your answer is remembered for this connection for the rest of this session."/>
+                </TextBlock>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                    <Button Command="{Binding ConfirmDecryptCommand}" Content="Decrypt" Classes="accent" IsDefault="True"/>
+                    <Button Command="{Binding DeclineDecryptCommand}" Content="Skip"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+    </Grid>
+</UserControl>

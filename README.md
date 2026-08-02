@@ -2,7 +2,7 @@
 
 *(formerly SqlTools)*
 
-A Windows desktop app (built on Avalonia UI, .NET 10) for searching, browsing, scripting, and bulk-exporting objects on Microsoft SQL Servers — plus a built-in ad-hoc query tool that exports results straight to Excel.
+A cross-platform desktop app (built on Avalonia UI and .NET 10) for searching, browsing, scripting, and bulk-exporting objects on Microsoft SQL Servers — plus a built-in ad-hoc query tool that exports results straight to Excel. Official prebuilt binaries currently target Windows.
 
 SqlPhanos started as a focused "find the object I'm looking for" tool. It's grown into a much broader SQL Server workbench: live object scripting with dependent-object discovery, encrypted-object decryption, CLR object decompilation, whole-database bulk export with delta detection, and query-to-Excel export — all built around a ScriptDom-based SQL formatter with a round-trip safety net that refuses to hand you corrupted output.
 
@@ -79,9 +79,20 @@ SqlPhanos's SQL formatter is built on `Microsoft.SqlServer.TransactSql.ScriptDom
 
 ## Requirements
 
-* Windows 10/11 (the app targets Windows and publishes a `win-x64` build; there's no current Linux/macOS support).
-* .NET 10.
+* Official prebuilt and tested releases target Windows 10/11 (`win-x64`).
+* Linux and macOS users can build or publish SqlPhanos from source with the .NET 10 SDK, but those platforms are not yet formally tested or supported. The in-app updater is currently Windows-only, and integrated SQL authentication may require platform-specific Kerberos configuration.
+* A .NET 10 runtime is required for the framework-dependent builds.
 * A Microsoft SQL Server instance to connect to.
+
+To create a framework-dependent build from source:
+
+```shell
+# Linux x64
+dotnet publish SqlPhanos/SqlPhanos.csproj -c Release -r linux-x64 --self-contained false
+
+# macOS x64
+dotnet publish SqlPhanos/SqlPhanos.csproj -c Release -r osx-x64 --self-contained false
+```
 
 ## Status
 

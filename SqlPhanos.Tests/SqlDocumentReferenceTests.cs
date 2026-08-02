@@ -7,6 +7,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO;
+using System.Text.Json;
+using SqlPhanos.Models;
 using Xunit;
 
 namespace SqlPhanos.Tests;
@@ -23,6 +26,54 @@ public class SqlDocumentReferenceTests
         var reference = new SqlDocumentReference(10, 5, "dbo.Table1", null, false);
 
         Assert.Equal(expected, reference.Contains(offset));
+    }
+
+    public sealed class ConnectionProfileStoreServiceTests
+    {
+        [Fact]
+        public void LegacyProfilesReceiveStablePersistedIdsWithoutPersistingPasswords()
+        {
+            var directory = Path.Combine(
+                Path.GetTempPath(),
+                $"SqlPhanos-profile-tests-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "connections.json");
+
+            try
+            {
+                File.WriteAllText(
+                    path,
+                    """
+                    {
+                      "Connections": [
+                        {
+                          "ServerAndInstance": "Server1",
+                          "UseWindowsAuth": false,
+                          "UserName": "User1",
+                          "TrustServerCertificate": true
+                        }
+                      ]
+                    }
+                    """);
+                var service = new ConnectionProfileStoreService(path);
+
+                var firstLoad = Assert.Single(service.LoadConnections());
+                firstLoad.Password = "NotPersisted";
+                service.SaveConnections(new[] { firstLoad });
+                var secondLoad = Assert.Single(service.LoadConnections());
+                var persisted = JsonSerializer.Deserialize<ConnectionProfileStore>(
+                    File.ReadAllText(path));
+
+                Assert.NotEqual(Guid.Empty, firstLoad.ProfileId);
+                Assert.Equal(firstLoad.ProfileId, secondLoad.ProfileId);
+                Assert.Equal(firstLoad.ProfileId, Assert.Single(persisted!.Connections).Id);
+                Assert.DoesNotContain("NotPersisted", File.ReadAllText(path), StringComparison.Ordinal);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 
     [Fact]
