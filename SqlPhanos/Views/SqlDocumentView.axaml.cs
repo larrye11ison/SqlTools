@@ -1,4 +1,7 @@
-﻿using Avalonia.Controls;
+﻿using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
@@ -23,11 +26,13 @@ public partial class SqlDocumentView : UserControl
     private enum FindTarget { Sql, Clr }
 
     private readonly RegistryOptions _registryOptions = new(ThemeName.DarkPlus);
+    private readonly Cursor _handCursor = new(StandardCursorType.Hand);
     private TextEditor? _editor;
     private TextEditor? _clrEditor;
     private Grid? _contentGrid;
     private TextMateHost.Installation? _textMateInstallation;
     private TextMateHost.Installation? _clrTextMateInstallation;
+    private SqlReferenceColorizer? _referenceColorizer;
     private SearchPanel? _searchPanel;
     private SearchPanel? _clrSearchPanel;
     // Which editor's Find panel is currently open, if any - Ctrl+F toggles between the two
@@ -36,6 +41,7 @@ public partial class SqlDocumentView : UserControl
     private SqlDocumentViewModel? _trackedViewModel;
     private int? _pendingCaretOffset;
     private bool _pendingCaretWasFormatted;
+    private bool _isSynchronizingEditorState;
 
     public SqlDocumentView()
     {
@@ -48,7 +54,11 @@ public partial class SqlDocumentView : UserControl
         }
 
         AttachedToVisualTree += (_, _) => EnsureTextMateInstalled();
-        DetachedFromVisualTree += (_, _) => DisposeTextMate();
+        DetachedFromVisualTree += (_, _) =>
+        {
+            PersistEditorViewState();
+            DisposeTextMate();
+        };
         DataContextChanged += (_, _) => SyncFromViewModel();
         ActualThemeVariantChanged += (_, _) => ApplyTheme();
 
@@ -212,8 +222,18 @@ public partial class SqlDocumentView : UserControl
             true,
             ex => System.Diagnostics.Debug.WriteLine($"TextMate initialization error: {ex.Message}"));
 
+        _referenceColorizer = new SqlReferenceColorizer(GetActiveReferences);
+        _editor.TextArea.TextView.LineTransformers.Add(_referenceColorizer);
+        _editor.TextArea.Caret.PositionChanged += OnEditorViewStateChanged;
+        _editor.TextArea.TextView.ScrollOffsetChanged += OnEditorViewStateChanged;
+        _editor.AddHandler(InputElement.PointerPressedEvent, OnEditorPointerPressed, RoutingStrategies.Tunnel);
+        _editor.PointerMoved += OnEditorPointerMoved;
+        _editor.PointerExited += OnEditorPointerExited;
+
         if (_clrEditor is not null)
         {
+            _clrEditor.TextArea.Caret.PositionChanged += OnClrEditorViewStateChanged;
+            _clrEditor.TextArea.TextView.ScrollOffsetChanged += OnClrEditorViewStateChanged;
             _clrTextMateInstallation = TextMateHost.InstallTextMate(
                 _clrEditor,
                 _registryOptions,
@@ -226,6 +246,111 @@ public partial class SqlDocumentView : UserControl
         SyncFromViewModel();
     }
 
+    private System.Collections.Generic.IReadOnlyList<SqlDocumentReference> GetActiveReferences() =>
+        _trackedViewModel?.ActiveReferences ?? Array.Empty<SqlDocumentReference>();
+
+    private SqlDocumentReference? GetReferenceAtPointer(PointerEventArgs e)
+    {
+        if (_editor?.Document is null)
+        {
+            return null;
+        }
+
+        var textView = _editor.TextArea.TextView;
+        var scrollOffset = textView.ScrollOffset;
+        var editorPoint = e.GetPosition(_editor) +
+            new Point(scrollOffset.X, Math.Floor(scrollOffset.Y));
+        var translatedPoint = _editor.TranslatePoint(editorPoint, textView);
+        if (translatedPoint is null)
+        {
+            return null;
+        }
+
+        // AvaloniaEdit's TextEditor.GetPositionFromPoint uses nearest-boundary rounding. That
+        // maps the trailing half of a link's final glyph to the exclusive end offset, making
+        // the hand cursor flicker off before the pointer has actually left the identifier.
+        var position = textView.GetPositionFloor(translatedPoint.Value);
+        if (position is null)
+        {
+            return null;
+        }
+
+        var offset = _editor.Document.GetOffset(position.Value.Location);
+        foreach (var reference in GetActiveReferences())
+        {
+            if (reference.Contains(offset))
+            {
+                return reference;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnEditorPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_editor is null)
+        {
+            return;
+        }
+
+        var reference = GetReferenceAtPointer(e);
+        if (reference?.IsClickable == true)
+        {
+            _editor.Cursor = _handCursor;
+            _editor.TextArea.Cursor = _handCursor;
+            _editor.TextArea.TextView.Cursor = _handCursor;
+        }
+        else
+        {
+            ResetEditorCursor();
+        }
+
+        ToolTip.SetTip(_editor, reference?.ToolTipText);
+        ToolTip.SetIsOpen(_editor, reference is not null);
+    }
+
+    private void OnEditorPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (_editor is null)
+        {
+            return;
+        }
+
+        ResetEditorCursor();
+        ToolTip.SetIsOpen(_editor, false);
+    }
+
+    private void ResetEditorCursor()
+    {
+        if (_editor is null)
+        {
+            return;
+        }
+
+        _editor.ClearValue(InputElement.CursorProperty);
+        _editor.TextArea.ClearValue(InputElement.CursorProperty);
+        _editor.TextArea.TextView.ClearValue(InputElement.CursorProperty);
+    }
+
+    private void OnEditorPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not SqlDocumentViewModel viewModel ||
+            e.GetCurrentPoint(_editor).Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed)
+        {
+            return;
+        }
+
+        var reference = GetReferenceAtPointer(e);
+        if (reference?.IsClickable != true)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        viewModel.OpenReference(reference);
+    }
+
     private void SyncFromViewModel()
     {
         if (_editor is null)
@@ -235,6 +360,11 @@ public partial class SqlDocumentView : UserControl
 
         if (_trackedViewModel is not null)
         {
+            if (!ReferenceEquals(_trackedViewModel, DataContext))
+            {
+                PersistEditorViewState();
+            }
+
             _trackedViewModel.PropertyChanging -= OnViewModelPropertyChanging;
             _trackedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _trackedViewModel = null;
@@ -245,14 +375,22 @@ public partial class SqlDocumentView : UserControl
             _trackedViewModel = viewModel;
             _trackedViewModel.PropertyChanging += OnViewModelPropertyChanging;
             _trackedViewModel.PropertyChanged += OnViewModelPropertyChanged;
-            UpdateEditorDocument(viewModel);
-            ApplyGrammar(viewModel.SyntaxScopeName);
-            // Re-attaching (e.g. switching MDI tabs away and back) disposes and reinstalls
-            // TextMate (see AttachedToVisualTree/DetachedFromVisualTree), which is what was
-            // silently dropping the decompiled C# pane's content - nothing here previously
-            // restored it or the CLR-vs-non-CLR row sizing on that path, only the main editor.
-            UpdateClrEditorDocument(viewModel);
-            ApplyClrRowSizing(viewModel);
+            _isSynchronizingEditorState = true;
+            try
+            {
+                UpdateEditorDocument(viewModel);
+                ApplyGrammar(viewModel.SyntaxScopeName);
+                // Re-attaching (e.g. switching MDI tabs away and back) disposes and reinstalls
+                // TextMate (see AttachedToVisualTree/DetachedFromVisualTree), which is what was
+                // silently dropping the decompiled C# pane's content - nothing here previously
+                // restored it or the CLR-vs-non-CLR row sizing on that path, only the main editor.
+                UpdateClrEditorDocument(viewModel);
+                ApplyClrRowSizing(viewModel);
+            }
+            finally
+            {
+                _isSynchronizingEditorState = false;
+            }
         }
         else
         {
@@ -320,6 +458,10 @@ public partial class SqlDocumentView : UserControl
         {
             ApplyClrRowSizing(viewModel);
         }
+        else if (e.PropertyName == nameof(SqlDocumentViewModel.ActiveReferences))
+        {
+            _editor?.TextArea.TextView.Redraw();
+        }
     }
 
     private void UpdateClrEditorDocument(SqlDocumentViewModel viewModel)
@@ -329,9 +471,15 @@ public partial class SqlDocumentView : UserControl
             return;
         }
 
-        // Set once when decompilation finishes, never toggled back and forth like Original/
-        // Formatted - no caret/scroll preservation needed, unlike UpdateEditorDocument above.
-        _clrEditor.Document = new TextDocument(viewModel.DecompiledClrSource ?? string.Empty);
+        var newText = viewModel.DecompiledClrSource ?? string.Empty;
+        if (_clrEditor.Document?.Text == newText)
+        {
+            RestoreEditorViewState(_clrEditor, viewModel.ClrEditorViewState);
+            return;
+        }
+
+        _clrEditor.Document = new TextDocument(newText);
+        RestoreEditorViewState(_clrEditor, viewModel.ClrEditorViewState);
     }
 
     private void UpdateEditorDocument(SqlDocumentViewModel viewModel)
@@ -358,11 +506,26 @@ public partial class SqlDocumentView : UserControl
             // explicitly too after a full-text replace, so this makes no assumptions either.
             _editor.CaretOffset = 0;
             _pendingCaretOffset = null;
+            RestoreEditorViewState(_editor, viewModel.SqlEditorViewState);
+            return;
+        }
+
+        // MDI tab changes detach and later reattach this same view. The TextDocument is still
+        // the same logical document, so replacing its unchanged text would reset AvaloniaEdit's
+        // caret to offset 0. Keep the document intact and restore the viewport captured before
+        // detaching instead.
+        if (_editor.Document.Text == newText)
+        {
+            _pendingCaretOffset = null;
+            RestoreEditorViewState(_editor, viewModel.SqlEditorViewState);
             return;
         }
 
         var scrollOffset = _editor.TextArea.TextView.ScrollOffset;
         var hadFocus = _editor.TextArea.IsFocused;
+        var persistedViewState = _pendingCaretOffset is null
+            ? viewModel.SqlEditorViewState
+            : null;
 
         // An Original/Formatted toggle: OnViewModelPropertyChanging captured where the caret was
         // in the rendering we're leaving. Map it to the equivalent spot in the new text via the
@@ -392,10 +555,13 @@ public partial class SqlDocumentView : UserControl
                 editor.CaretOffset = Math.Clamp(toOffset, 0, newText.Length);
                 editor.TextArea.Caret.BringCaretToView();
             }
+            else if (persistedViewState is not null)
+            {
+                ApplyEditorViewState(editor, persistedViewState);
+            }
             else
             {
-                editor.ScrollToHorizontalOffset(scrollOffset.X);
-                editor.ScrollToVerticalOffset(scrollOffset.Y);
+                SetScrollOffset(editor, scrollOffset);
             }
 
             if (hadFocus)
@@ -404,6 +570,112 @@ public partial class SqlDocumentView : UserControl
             }
         }, DispatcherPriority.Input);
     }
+
+    private void OnEditorViewStateChanged(object? sender, EventArgs e) =>
+        PersistEditorViewStateIfReady();
+
+    private void OnClrEditorViewStateChanged(object? sender, EventArgs e) =>
+        PersistClrEditorViewStateIfReady();
+
+    private void PersistEditorViewStateIfReady()
+    {
+        if (!_isSynchronizingEditorState)
+        {
+            PersistEditorViewState();
+        }
+    }
+
+    private void PersistClrEditorViewStateIfReady()
+    {
+        if (!_isSynchronizingEditorState)
+        {
+            PersistClrEditorViewState();
+        }
+    }
+
+    private void PersistEditorViewState()
+    {
+        if (_trackedViewModel is null)
+        {
+            return;
+        }
+
+        if (_editor?.Document is not null)
+        {
+            var offset = _editor.TextArea.TextView.ScrollOffset;
+            _trackedViewModel.SqlEditorViewState = new TextEditorViewState(
+                _editor.CaretOffset,
+                offset.X,
+                offset.Y);
+        }
+
+        PersistClrEditorViewState();
+    }
+
+    private void PersistClrEditorViewState()
+    {
+        if (_trackedViewModel is null || _clrEditor?.Document is null)
+        {
+            return;
+        }
+
+        var offset = _clrEditor.TextArea.TextView.ScrollOffset;
+        _trackedViewModel.ClrEditorViewState = new TextEditorViewState(
+            _clrEditor.CaretOffset,
+            offset.X,
+            offset.Y);
+    }
+
+    private void RestoreEditorViewState(
+        TextEditor editor,
+        TextEditorViewState? state)
+    {
+        if (state is null || editor.Document is null)
+        {
+            return;
+        }
+
+        // A recreated dock view has not measured its TextView yet. Apply once after the current
+        // dispatcher work and once after its first layout so extent clamping cannot turn the
+        // requested viewport back into (0, 0).
+        EventHandler? layoutUpdated = null;
+        layoutUpdated = (_, _) =>
+        {
+            editor.LayoutUpdated -= layoutUpdated;
+            ApplyPersistedEditorViewState(editor, state);
+        };
+        editor.LayoutUpdated += layoutUpdated;
+        Dispatcher.UIThread.Post(() =>
+            ApplyPersistedEditorViewState(editor, state),
+            DispatcherPriority.Background);
+    }
+
+    private void ApplyPersistedEditorViewState(TextEditor editor, TextEditorViewState state)
+    {
+        _isSynchronizingEditorState = true;
+        try
+        {
+            ApplyEditorViewState(editor, state);
+        }
+        finally
+        {
+            _isSynchronizingEditorState = false;
+        }
+    }
+
+    private static void ApplyEditorViewState(TextEditor editor, TextEditorViewState state)
+    {
+        if (editor.Document is null)
+        {
+            return;
+        }
+
+        editor.CaretOffset = Math.Clamp(state.CaretOffset, 0, editor.Document.TextLength);
+        SetScrollOffset(editor, new Vector(state.HorizontalOffset, state.VerticalOffset));
+    }
+
+    private static void SetScrollOffset(TextEditor editor, Vector offset) =>
+        ((IScrollable)editor.TextArea.TextView).Offset = offset;
 
     private void ApplyGrammar(string? scopeName)
     {
@@ -425,6 +697,17 @@ public partial class SqlDocumentView : UserControl
 
         _textMateInstallation?.SetTheme(_registryOptions.LoadTheme(themeName));
         _clrTextMateInstallation?.SetTheme(_registryOptions.LoadTheme(themeName));
+
+        if (_referenceColorizer is not null)
+        {
+            _referenceColorizer.LinkBrush = new SolidColorBrush(
+                ActualThemeVariant == ThemeVariant.Light ? Color.Parse("#005FB8") : Color.Parse("#4FC1FF"));
+            _referenceColorizer.LinkedServerBrush = new SolidColorBrush(
+                ActualThemeVariant == ThemeVariant.Light ? Color.Parse("#9A6700") : Color.Parse("#DCDCAA"));
+            _referenceColorizer.UnresolvedBrush = new SolidColorBrush(
+                ActualThemeVariant == ThemeVariant.Light ? Color.Parse("#B42318") : Color.Parse("#F48771"));
+            _editor?.TextArea.TextView.Redraw();
+        }
     }
 
     private void DisposeTextMate()
@@ -446,5 +729,28 @@ public partial class SqlDocumentView : UserControl
         _clrSearchPanel?.Uninstall();
         _clrSearchPanel = null;
         _openFindTarget = null;
+
+        if (_editor is not null)
+        {
+            _editor.TextArea.Caret.PositionChanged -= OnEditorViewStateChanged;
+            _editor.TextArea.TextView.ScrollOffsetChanged -= OnEditorViewStateChanged;
+            if (_referenceColorizer is not null)
+            {
+                _editor.TextArea.TextView.LineTransformers.Remove(_referenceColorizer);
+                _referenceColorizer = null;
+            }
+
+            _editor.RemoveHandler(InputElement.PointerPressedEvent, OnEditorPointerPressed);
+            _editor.PointerMoved -= OnEditorPointerMoved;
+            _editor.PointerExited -= OnEditorPointerExited;
+            ResetEditorCursor();
+            ToolTip.SetIsOpen(_editor, false);
+        }
+
+        if (_clrEditor is not null)
+        {
+            _clrEditor.TextArea.Caret.PositionChanged -= OnClrEditorViewStateChanged;
+            _clrEditor.TextArea.TextView.ScrollOffsetChanged -= OnClrEditorViewStateChanged;
+        }
     }
 }

@@ -42,7 +42,7 @@ public class SqlSearchService
             )
         SELECT @@SERVERNAME AS server_name
             ,cast(db_name() AS SYSNAME) AS db_name
-            ,ao.type_desc
+            ,CASE WHEN ao.type = 'TT' THEN 'TABLE_TYPE' ELSE ao.type_desc END AS type_desc
             ,ao.object_id
             ,sch.NAME AS schema_name
             ,ao.NAME AS object_name
@@ -60,20 +60,22 @@ public class SqlSearchService
             SELECT isnull(object_definition(ao.object_id), '') AS object_definition
             ) def
         WHERE ao.is_ms_shipped = 0
-            AND ao.type_desc IN (
-                'SQL_INLINE_TABLE_VALUED_FUNCTION'
-                ,'SQL_SCALAR_FUNCTION'
-                ,'SQL_STORED_PROCEDURE'
-                ,'SQL_TABLE_VALUED_FUNCTION'
-                ,'SQL_TRIGGER'
-                ,'USER_TABLE'
-                ,'VIEW'
-                ,'SEQUENCE_OBJECT'
-                ,'TABLE_TYPE'
-                ,'CLR_STORED_PROCEDURE'
-                ,'CLR_SCALAR_FUNCTION'
-                ,'CLR_TABLE_VALUED_FUNCTION'
-                ,'CLR_TRIGGER'
+            AND (
+                ao.type_desc IN (
+                    'SQL_INLINE_TABLE_VALUED_FUNCTION'
+                    ,'SQL_SCALAR_FUNCTION'
+                    ,'SQL_STORED_PROCEDURE'
+                    ,'SQL_TABLE_VALUED_FUNCTION'
+                    ,'SQL_TRIGGER'
+                    ,'USER_TABLE'
+                    ,'VIEW'
+                    ,'SEQUENCE_OBJECT'
+                    ,'CLR_STORED_PROCEDURE'
+                    ,'CLR_SCALAR_FUNCTION'
+                    ,'CLR_TABLE_VALUED_FUNCTION'
+                    ,'CLR_TRIGGER'
+                    )
+                OR ao.type = 'TT'
                 )
             AND (ao.NAME LIKE @objectNameSearch)
             AND (sch.NAME LIKE @objectSchemaSearch)
@@ -86,8 +88,9 @@ public class SqlSearchService
     // sys.types, not sys.objects - sys.types has no type_desc column of its own, so this can't just
     // extend ObjectsQuery's IN list; it's a separate query, run alongside it and merged into the
     // same result list. is_table_type = 0 excludes user-defined table types, which DO have a
-    // sys.objects row (type_desc = 'TABLE_TYPE') and are already covered by ObjectsQuery - without
-    // this exclusion they'd be listed twice. Deliberately ignores @objectDefinitionSearchParam______:
+    // sys.objects row (type_desc = 'TYPE_TABLE', mapped to the app's 'TABLE_TYPE') and are already
+    // covered by ObjectsQuery - without this exclusion they'd be listed twice. Deliberately ignores
+    // @objectDefinitionSearchParam______:
     // these types have no body/definition to search, so a definition-text filter simply doesn't
     // apply to them rather than hiding them entirely.
     private const string UserDefinedTypesQuery = @"

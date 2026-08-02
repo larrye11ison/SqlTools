@@ -22,6 +22,11 @@ public enum SqlDisplayMode
     Formatted,
 }
 
+internal sealed record TextEditorViewState(
+    int CaretOffset,
+    double HorizontalOffset,
+    double VerticalOffset);
+
 /// <summary>
 /// View model for a single SQL script document. Owns its own scripting lifecycle: it opens
 /// immediately in a busy state and scripts itself (rather than the Search pane scripting the
@@ -32,6 +37,8 @@ public enum SqlDisplayMode
 public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 {
     private readonly SqlCanonicalizationService _sqlCanonicalizationService = new();
+    private readonly SqlObjectReferenceAnalyzer _sqlObjectReferenceAnalyzer = new();
+    private static readonly SqlObjectReferenceResolver SqlObjectReferenceResolver = new();
     private readonly SqlSearchService? _searchService;
     private readonly string _connectionString = "";
     private readonly SearchResultViewModel? _sourceResult;
@@ -44,6 +51,8 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     private string _formattedSqlText = "";
     private ObservableCollection<SearchResultViewModel> _dependentObjects = new();
     private string _originalSqlText = "";
+    private IReadOnlyList<SqlDocumentReference> _originalReferences = Array.Empty<SqlDocumentReference>();
+    private IReadOnlyList<SqlDocumentReference> _formattedReferences = Array.Empty<SqlDocumentReference>();
     private IReadOnlyList<SqlTokenPosition>? _tokenPositions;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource<bool>? _encryptedConsentTcs;
@@ -54,6 +63,9 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     // CancelScripting() (which only requests cancellation; it doesn't itself wait for anything).
     private TaskCompletionSource? _operationCompletionTcs;
     private TaskCompletionSource<bool>? _closeConfirmationTcs;
+
+    internal TextEditorViewState? SqlEditorViewState { get; set; }
+    internal TextEditorViewState? ClrEditorViewState { get; set; }
 
     public string CurrentSqlText
     {
@@ -133,6 +145,9 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
 
     public bool HasDependentObjects => DependentObjects.Count > 0;
 
+    public IReadOnlyList<SqlDocumentReference> ActiveReferences =>
+        IsShowingFormatted ? _formattedReferences : _originalReferences;
+
     public SqlDisplayMode DisplayMode
     {
         get => _displayMode;
@@ -142,6 +157,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             {
                 OnPropertyChanged(nameof(IsShowingOriginal));
                 OnPropertyChanged(nameof(IsShowingFormatted));
+                OnPropertyChanged(nameof(ActiveReferences));
             }
         }
     }
@@ -224,6 +240,8 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
     {
         _cts = new CancellationTokenSource();
         _operationCompletionTcs = new TaskCompletionSource();
+        SetReferences(Array.Empty<SqlDocumentReference>(), Array.Empty<SqlDocumentReference>());
+        SetDependentObjects(Array.Empty<SearchResultViewModel>());
         try
         {
             var scripted = await ScriptWithConsentAsync(_cts.Token);
@@ -236,6 +254,19 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             DisplayMode = SqlDisplayMode.Original;
             FormattingSafetyCheckFailed = !formatResult.SafetyCheckPassed;
             PendingFormattingSafetyWarning = FormattingSafetyCheckFailed;
+
+            try
+            {
+                await LoadReferencesAsync(script, formatResult.Text, _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Object reference lookup failed: {ex}");
+            }
 
             if (scripted.ClrAssemblyName is not null)
             {
@@ -254,6 +285,7 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
                 System.Diagnostics.Debug.WriteLine($"Dependent object lookup failed: {ex}");
             }
         }
+
         catch (OperationCanceledException)
         {
             // Matches QueryXLeratorDocumentViewModel's convention: a user-initiated cancel is
@@ -274,6 +306,187 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
             _operationCompletionTcs = null;
         }
     }
+
+    private async Task LoadReferencesAsync(
+        string originalSql,
+        string formattedSql,
+        CancellationToken cancellationToken)
+    {
+        var originalAnalysisTask = Task.Run(
+            () => _sqlObjectReferenceAnalyzer.Analyze(originalSql),
+            cancellationToken);
+        Task<SqlObjectReferenceAnalysisResult> formattedAnalysisTask;
+        if (string.Equals(originalSql, formattedSql, StringComparison.Ordinal))
+        {
+            formattedAnalysisTask = originalAnalysisTask;
+        }
+        else
+        {
+            formattedAnalysisTask = Task.Run(
+                () => _sqlObjectReferenceAnalyzer.Analyze(formattedSql),
+                cancellationToken);
+        }
+
+        await Task.WhenAll(originalAnalysisTask, formattedAnalysisTask);
+        var originalAnalysis = await originalAnalysisTask;
+        var formattedAnalysis = await formattedAnalysisTask;
+        if (!originalAnalysis.ParseSucceeded)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"Original SQL reference analysis reported {originalAnalysis.ParseErrors.Count} parse error(s).");
+        }
+        if (!formattedAnalysis.ParseSucceeded)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"Formatted SQL reference analysis reported {formattedAnalysis.ParseErrors.Count} parse error(s).");
+        }
+
+        if (originalAnalysis.References.Count == 0 && formattedAnalysis.References.Count == 0)
+        {
+            return;
+        }
+
+        var lookupIds = new Dictionary<string, int>(StringComparer.Ordinal);
+        var lookups = new List<SqlObjectReferenceLookup>();
+
+        void AddLookups(IEnumerable<SqlObjectReference> references)
+        {
+            foreach (var reference in references)
+            {
+                if (reference.Classification != SqlObjectReferenceClassification.Local)
+                {
+                    continue;
+                }
+
+                var key = CreateReferenceKey(reference);
+                if (lookupIds.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                var id = lookupIds.Count;
+                lookupIds.Add(key, id);
+                lookups.Add(new SqlObjectReferenceLookup(
+                    id,
+                    reference.Database,
+                    reference.Schema,
+                    reference.Object,
+                    reference.Kind));
+            }
+        }
+
+        AddLookups(originalAnalysis.References);
+        AddLookups(formattedAnalysis.References);
+
+        var resolved = await SqlObjectReferenceResolver.ResolveAsync(
+            _connectionString,
+            DbName,
+            lookups,
+            cancellationToken);
+
+        SetReferences(
+            CreateDocumentReferences(originalAnalysis.References, lookupIds, resolved),
+            CreateDocumentReferences(formattedAnalysis.References, lookupIds, resolved));
+    }
+
+    private IReadOnlyList<SqlDocumentReference> CreateDocumentReferences(
+        IReadOnlyList<SqlObjectReference> references,
+        IReadOnlyDictionary<string, int> lookupIds,
+        IReadOnlyDictionary<int, SqlObjectReferenceResolution> resolutions)
+    {
+        var documentReferences = new List<SqlDocumentReference>();
+
+        foreach (var reference in references)
+        {
+            if (reference.Classification != SqlObjectReferenceClassification.Local)
+            {
+                documentReferences.Add(new SqlDocumentReference(
+                    reference.Offset,
+                    reference.Length,
+                    reference.Text,
+                    target: null,
+                    isLinkedServer:
+                        reference.Classification == SqlObjectReferenceClassification.LinkedServer,
+                    isRemoteDataSource:
+                        reference.Classification == SqlObjectReferenceClassification.RemoteDataSource));
+                continue;
+            }
+
+            var key = CreateReferenceKey(reference);
+            if (!lookupIds.TryGetValue(key, out var lookupId) ||
+                !resolutions.TryGetValue(lookupId, out var resolution))
+            {
+                documentReferences.Add(CreateUnresolvedReference(
+                    reference,
+                    "Referenced object could not be resolved. The script may fail until the reference is corrected."));
+                continue;
+            }
+
+            if (resolution.Target is { } target)
+            {
+                if (IsCurrentObject(target))
+                {
+                    continue;
+                }
+
+                documentReferences.Add(new SqlDocumentReference(
+                    reference.Offset,
+                    reference.Length,
+                    reference.Text,
+                    target,
+                    isLinkedServer: false));
+                continue;
+            }
+
+            documentReferences.Add(CreateUnresolvedReference(
+                reference,
+                GetResolutionWarning(reference, resolution)));
+        }
+
+        return documentReferences;
+    }
+
+    private static SqlDocumentReference CreateUnresolvedReference(
+        SqlObjectReference reference,
+        string warning) =>
+        new(
+            reference.Offset,
+            reference.Length,
+            reference.Text,
+            target: null,
+            isLinkedServer: false,
+            warning);
+
+    private string GetResolutionWarning(
+        SqlObjectReference reference,
+        SqlObjectReferenceResolution resolution)
+    {
+        var databaseName = reference.Database ?? DbName;
+        return resolution.Status switch
+        {
+            SqlObjectReferenceResolutionStatus.DatabaseUnavailable =>
+                $"Database '{databaseName}' could not be inspected: {resolution.Detail} The script may fail until access is restored.",
+            SqlObjectReferenceResolutionStatus.Ambiguous =>
+                "More than one possible object matched this reference, so it could not be scripted safely.",
+            _ =>
+                $"No scriptable object named '{reference.Text}' was found or visible to this connection in database '{databaseName}'. The script may fail until the reference is corrected.",
+        };
+    }
+
+    private static string CreateReferenceKey(SqlObjectReference reference) =>
+        $"{(int)reference.Kind}\u001f{reference.Database ?? ""}\u001f{reference.Schema ?? ""}\u001f{reference.Object}";
+
+    private bool IsCurrentObject(SearchResultViewModel target) =>
+        _sourceResult is not null && IsSameObject(target, _sourceResult);
+
+    internal static bool IsSameObject(
+        SearchResultViewModel candidate,
+        SearchResultViewModel source) =>
+        string.Equals(candidate.DbName, source.DbName, StringComparison.Ordinal) &&
+        string.Equals(candidate.SchemaName, source.SchemaName, StringComparison.Ordinal) &&
+        string.Equals(candidate.ObjectName, source.ObjectName, StringComparison.Ordinal) &&
+        string.Equals(candidate.TypeDesc, source.TypeDesc, StringComparison.Ordinal) &&
+        string.Equals(candidate.ParentFqName, source.ParentFqName, StringComparison.Ordinal);
 
     /// <summary>
     /// Fetches the CLR assembly's raw bytes and decompiles them into the standalone C# source
@@ -544,6 +757,26 @@ public partial class SqlDocumentViewModel : Document, IHasTabHeaderLines
         }
 
         OnPropertyChanged(nameof(HasDependentObjects));
+    }
+
+    private void SetReferences(
+        IReadOnlyList<SqlDocumentReference> originalReferences,
+        IReadOnlyList<SqlDocumentReference> formattedReferences)
+    {
+        _originalReferences = originalReferences;
+        _formattedReferences = formattedReferences;
+        OnPropertyChanged(nameof(ActiveReferences));
+    }
+
+    public void OpenReference(SqlDocumentReference reference)
+    {
+        if (!reference.IsClickable || reference.Target is null || _searchService is null)
+        {
+            return;
+        }
+
+        var doc = new SqlDocumentViewModel(reference.Target, _connectionString, _searchService);
+        WeakReferenceMessenger.Default.Send(new OpenDocumentMessage(doc));
     }
 
     [RelayCommand]

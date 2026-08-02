@@ -54,4 +54,8 @@
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="181.19.0" />
 
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SqlPhanos.Tests" />
+  </ItemGroup>
 </Project>
