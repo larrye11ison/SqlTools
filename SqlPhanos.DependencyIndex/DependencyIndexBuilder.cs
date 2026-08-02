@@ -433,11 +433,26 @@ public sealed class DependencyIndexBuilder
     private static DependencyEdgeDraft Structural(DatabaseCatalogSnapshot database, CatalogMap catalog,
         int sourceId, int targetId, string kind, EvidenceKind evidence)
     {
-        var target = catalog.ByIdentity[(database.Database.SqlDatabaseId, targetId)];
-        return new DependencyEdgeDraft(sourceId, targetId, database.Database.SqlDatabaseId, kind,
-            ReferenceClassification.Structural, ResolutionStatus.Resolved, null, null,
-            database.Database.Name, target.SchemaName, target.Name, null, null, target.SchemaName,
-            target.Name, 2, evidence, []);
+        if (catalog.ByIdentity.TryGetValue((database.Database.SqlDatabaseId, targetId), out var target))
+        {
+            return new DependencyEdgeDraft(sourceId, targetId, database.Database.SqlDatabaseId, kind,
+                ReferenceClassification.Structural, ResolutionStatus.Resolved, null, null,
+                database.Database.Name, target.SchemaName, target.Name, null, null, target.SchemaName,
+                target.Name, 2, evidence, []);
+        }
+
+        // The catalog snapshot's structural facts (sys.foreign_keys, parent_object_id, sys.types)
+        // and its object list (sys.objects) come from separate queries on a live connection, not
+        // one consistent point-in-time snapshot - on a busy production database, concurrent DDL
+        // between those queries can leave a structural reference pointing at an object_id this
+        // scan never captured. Surface that as an unresolved structural edge, the same way every
+        // other unresolvable reference in this codebase is handled, instead of throwing and
+        // losing the rest of this database's analysis.
+        var placeholderName = $"<object_id {targetId}>";
+        return new DependencyEdgeDraft(sourceId, null, database.Database.SqlDatabaseId, kind,
+            ReferenceClassification.Structural, ResolutionStatus.NotFound, null, null,
+            database.Database.Name, null, placeholderName, null, null, null,
+            placeholderName, 2, evidence, []);
     }
 
     private static ResolvedReference Resolve(CatalogDatabase sourceDatabase, SqlObjectReference reference,
