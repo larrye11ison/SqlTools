@@ -22,8 +22,16 @@ namespace SqlPhanos.Updater;
 /// </summary>
 internal static class Program
 {
-    private const int MaxExtractAttempts = 10;
-    private static readonly TimeSpan ExtractRetryDelay = TimeSpan.FromMilliseconds(300);
+    // A fixed 300ms x 10 (≈2.7s total) proved far too short in practice - antivirus/EDR real-time
+    // scanning of newly-written EXE/DLLs (or an indexer/backup agent briefly opening them) can
+    // hold a lock for several seconds after SqlPhanos.exe itself has fully exited, well outside
+    // that window, causing this to report "files in use" on every single update. Exponential
+    // backoff up to a ~70s total budget gives that kind of external, invisible-to-the-user lock
+    // realistic time to clear, while still failing eventually instead of hanging forever.
+    private const int MaxExtractAttempts = 20;
+    private static readonly TimeSpan InitialExtractRetryDelay = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan MaxExtractRetryDelay = TimeSpan.FromSeconds(5);
+    private const double ExtractRetryBackoffFactor = 1.5;
     private static readonly TimeSpan ParentExitTimeout = TimeSpan.FromSeconds(15);
 
     private static void Main(string[] args)
@@ -114,6 +122,7 @@ internal static class Program
 
     private static bool ExtractWithRetry(string zipPath, string targetDir)
     {
+        var delay = InitialExtractRetryDelay;
         for (var attempt = 1; attempt <= MaxExtractAttempts; attempt++)
         {
             try
@@ -124,9 +133,14 @@ internal static class Program
             }
             catch (IOException ex) when (attempt < MaxExtractAttempts)
             {
-                // SqlPhanos.exe/its DLLs may not have fully released their file handles yet.
-                UpdateLog.Write($"Extraction attempt {attempt} failed, retrying: {ex.Message}");
-                Thread.Sleep(ExtractRetryDelay);
+                // SqlPhanos.exe/its DLLs, or something external (AV scan, indexer, backup agent),
+                // may not have fully released their file handles yet.
+                UpdateLog.Write($"Extraction attempt {attempt} failed, retrying in {delay.TotalSeconds:0.#}s: {ex.Message}");
+                Console.WriteLine($"Files still in use, retrying ({attempt}/{MaxExtractAttempts})...");
+                Thread.Sleep(delay);
+                delay = TimeSpan.FromMilliseconds(Math.Min(
+                    delay.TotalMilliseconds * ExtractRetryBackoffFactor,
+                    MaxExtractRetryDelay.TotalMilliseconds));
             }
             catch (IOException ex)
             {

@@ -149,6 +149,19 @@ public partial class ShellView : Window
         await aboutView.ShowDialog(this);
     }
 
+    // Saved connections (connections.json) and the per-server dependency index cache
+    // (dependency-indexes\<profileId>.sqlite3) both live under this one folder - see
+    // ConnectionProfileStoreService and DependencyExplorerDocumentViewModel, which each compute
+    // the same %LocalAppData%\SqlPhanos root independently.
+    private void OnOpenDataFolderClick(object? sender, RoutedEventArgs e)
+    {
+        var dataFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SqlPhanos");
+        Directory.CreateDirectory(dataFolder);
+        Process.Start(new ProcessStartInfo(dataFolder) { UseShellExecute = true });
+    }
+
     private void OnUpdateAvailableChanged(object? sender, EventArgs e)
     {
         // Fires from UpdateCheckService's background Timer, not the UI thread.
