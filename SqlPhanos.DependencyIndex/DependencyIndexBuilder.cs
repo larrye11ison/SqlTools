@@ -340,6 +340,7 @@ public sealed class DependencyIndexBuilder
         try
         {
             using var decryptor = _decryptorFactory.Connect(connectionString, database.Database.Name);
+            var completed = 0;
             foreach (var item in needingDecrypt)
             {
                 token.ThrowIfCancellationRequested();
@@ -352,6 +353,16 @@ public sealed class DependencyIndexBuilder
                     // Per-object decrypt failure (e.g. dropped mid-scan) - leave it out; falls back
                     // to AnalysisStatus.Encrypted like any other undecryptable object.
                 }
+                completed++;
+                // DAC decrypt is strictly sequential (one connection, one object at a time), so on
+                // a database with a lot of encrypted modules this phase can genuinely take a while -
+                // report after every object rather than throttling like the parallel analysis phase.
+                // ObjectCount/EdgeCount are left at 0 here (unlike AnalyzingDatabase's use of them)
+                // since the X-of-Y count is already in Message and those fields would otherwise
+                // render as a misleading "(N objects, M edges so far)" in the UI's generic formatter.
+                progress?.Report(new IndexProgress(IndexProgressPhase.DecryptingModules, currentDatabase,
+                    totalDatabases, database.Database.Name, 0, 0,
+                    $"Decrypting {completed} of {needingDecrypt.Count} in {database.Database.Name}..."));
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)

@@ -123,6 +123,8 @@
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_About SqlPhanos..." Click="OnAboutClick"/>
+                <MenuItem Header="_Open Data Folder" Click="OnOpenDataFolderClick"
+                          ToolTip.Tip="Opens the folder holding saved connections (connections.json) and the per-server dependency index cache (dependency-indexes\)."/>
             </MenuItem>
             <!-- Hidden until UpdateCheckService finds a newer release; then this fades in/out
                  (see ShellView.axaml.cs) to draw the eye without being obnoxious about it. -->
