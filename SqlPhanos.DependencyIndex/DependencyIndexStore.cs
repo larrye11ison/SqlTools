@@ -266,13 +266,24 @@ public sealed class DependencyIndexStore
             }
             foreach (var item in snapshot.Objects.Where(item => item.ParentSqlObjectId is not null))
             {
+                // objectKeys.GetValueOrDefault used to be used directly as the parameter here -
+                // for a parent object_id this scan never captured (same read-query-drift the
+                // structural-edge fix accounts for), that silently defaulted to 0, and 0 is not a
+                // real object_key, so the UPDATE below violated schema_objects' own self-referencing
+                // FK (parent_object_key REFERENCES schema_objects(object_key)). Leave
+                // parent_object_key NULL (already cleared above) instead of writing an invalid key.
+                if (!objectKeys.TryGetValue(item.ParentSqlObjectId!.Value, out var parentKey))
+                {
+                    continue;
+                }
+
                 await using var parent = connection.CreateCommand();
                 parent.Transaction = transaction;
                 parent.CommandText = """
                     UPDATE schema_objects SET parent_object_key=$parent
                     WHERE database_id=$database AND sql_object_id=$object;
                     """;
-                Add(parent, "$parent", objectKeys.GetValueOrDefault(item.ParentSqlObjectId!.Value));
+                Add(parent, "$parent", parentKey);
                 Add(parent, "$database", databaseId);
                 Add(parent, "$object", item.SqlObjectId);
                 await parent.ExecuteNonQueryAsync(cancellationToken);
