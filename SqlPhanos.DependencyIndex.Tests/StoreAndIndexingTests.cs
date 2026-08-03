@@ -213,6 +213,35 @@ public sealed class StoreAndIndexingTests
     }
 
     [Fact]
+    public async Task ChildObjectWithUncapturedParentDoesNotViolateForeignKey()
+    {
+        // Regression test: PromoteDatabaseSnapshotAsync's parent-linking loop used to pass
+        // objectKeys.GetValueOrDefault(item.ParentSqlObjectId!.Value) straight into an UPDATE -
+        // for a parent object_id this scan never captured (same read-query-drift scenario as
+        // StructuralReferenceToUncapturedObjectIdIsUnresolvedNotFatal, but hitting
+        // schema_objects.parent_object_key instead of a dependency edge), that silently defaulted
+        // to 0, and 0 is not a real object_key, so the UPDATE violated schema_objects' own
+        // self-referencing foreign key (SQLite error 19).
+        await using var index = await TestIndex.CreateAsync();
+        var database = new CatalogDatabase(5, "MainDb", null, "ONLINE", true);
+        var objects = new[]
+        {
+            // Parent (object_id 1, the owning table) is deliberately absent from this snapshot.
+            TestIndex.Object(2, "dbo", "TriggerOnMissingTable", "SQL_TRIGGER", null, parentId: 1),
+        };
+        var databaseSnapshot = new DatabaseCatalogSnapshot(database, objects, [], [], [], ScanOutcome.Succeeded);
+
+        var result = await index.Builder.BuildAsync(TestIndex.Snapshot(databases: [databaseSnapshot]),
+            new IndexBuildOptions(EncryptedModuleDecrypt: EncryptedModuleDecryptMode.Skip));
+
+        Assert.Equal(ScanOutcome.Succeeded, result.Outcome);
+        var trigger = (await index.Graph.SearchObjectsAsync("TriggerOnMissingTable", 10))
+            .Single(item => item.Name == "TriggerOnMissingTable");
+        Assert.Null(trigger.ParentObjectKey);
+        Assert.Null(trigger.Parent);
+    }
+
+    [Fact]
     public async Task CatalogStructuralFactsAndCoverageRemainVisible()
     {
         await using var index = await TestIndex.CreateAsync();
