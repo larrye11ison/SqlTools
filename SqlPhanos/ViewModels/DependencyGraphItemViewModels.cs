@@ -40,6 +40,10 @@ public partial class DependencyGraphNodeViewModel : ObservableObject
     // tab for - gates both the Objects list buttons and the graph canvas's button hot-zones.
     public bool HasIndexedObject => IndexedObject is not null;
 
+    // Drives the "dynamic SQL only" filter toggle - external/unresolved nodes have no
+    // AnalysisStatus at all and are never included regardless of the toggle.
+    public bool IsDynamicSql => IndexedObject?.AnalysisStatus == AnalysisStatus.DynamicSql;
+
     public string QualifiedName =>
         string.Join(
             ".",
