@@ -532,10 +532,27 @@ public sealed class DependencyIndexBuilder
                 continue;
             if (tokens[next].Text == "(")
                 next = NextSignificantToken(tokens, next + 1);
-            var nextText = next >= 0 ? tokens[next].Text : null;
-            if (nextText is not null && (nextText.StartsWith("@", StringComparison.Ordinal) ||
-                                         nextText.StartsWith("'", StringComparison.Ordinal) ||
-                                         nextText.Contains("sp_executesql", StringComparison.OrdinalIgnoreCase)))
+            if (next < 0)
+                continue;
+
+            // EXEC @returnCode = ProcName ... captures a return code from an ordinary static
+            // call - it is not dynamic SQL. The actual callee is the token after the "=", so
+            // re-check that instead of treating the capture variable itself as the callee.
+            if (tokens[next].Text.StartsWith("@", StringComparison.Ordinal))
+            {
+                var afterVariable = NextSignificantToken(tokens, next + 1);
+                if (afterVariable >= 0 && tokens[afterVariable].Text == "=")
+                {
+                    next = NextSignificantToken(tokens, afterVariable + 1);
+                    if (next < 0)
+                        continue;
+                }
+            }
+
+            var nextText = tokens[next].Text;
+            if (nextText.StartsWith("@", StringComparison.Ordinal) ||
+                nextText.StartsWith("'", StringComparison.Ordinal) ||
+                nextText.Contains("sp_executesql", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;

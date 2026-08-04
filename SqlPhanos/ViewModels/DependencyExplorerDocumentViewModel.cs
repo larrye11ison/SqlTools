@@ -63,6 +63,14 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
     private string _filterText = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilterPlaceholderText))]
+    private bool _showDynamicSqlOnly;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDynamicSqlObjects))]
+    private int _dynamicSqlCount;
+
+    [ObservableProperty]
     private GraphDirection _selectedDirection = GraphDirection.UsedBy;
 
     [ObservableProperty]
@@ -155,6 +163,14 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
     public bool CanBuildIndex => !IsBusy && !string.IsNullOrWhiteSpace(_connectionString);
     public bool CanCancel => IsBusy;
     public bool HasNodes => Nodes.Count > 0;
+    public bool HasDynamicSqlObjects => DynamicSqlCount > 0;
+
+    // The free-text filter and the "dynamic SQL only" toggle apply together (AND'ed in
+    // ApplyFilter) - this is the one visible hint that the text box is now searching within an
+    // already-narrowed set rather than the whole graph, alongside the toggle button's own
+    // pressed/checked state.
+    public string FilterPlaceholderText =>
+        ShowDynamicSqlOnly ? "Filter dynamic-SQL objects..." : "Filter visible objects...";
 
     public string TabHeaderLine1 => _root.ServerName;
     public string TabHeaderLine2 => $"Dependencies: {_root.SchemaName}.{_root.ObjectName}";
@@ -165,6 +181,8 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
         DocumentTabIconState.None;
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
+
+    partial void OnShowDynamicSqlOnlyChanged(bool value) => ApplyFilter();
 
     partial void OnSelectedDirectionChanged(GraphDirection value)
     {
@@ -397,6 +415,7 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
                     ? "This object is not in the current index. Refresh the index to include it."
                     : "No dependency index exists for this connection. Select Build Index to create it.";
                 CoverageSummary = "";
+                DynamicSqlCount = 0;
                 FreshnessSummary = "";
                 return;
             }
@@ -417,6 +436,7 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
                     : $"Showing {result.Nodes.Count:N0} objects and {result.Edges.Count:N0} dependencies.";
             }
             CoverageSummary = FormatCoverage(result.Coverage);
+            DynamicSqlCount = result.Coverage.DynamicSql;
             FreshnessSummary = result.Freshness.LastSuccessfulScanUtc is { } last
                 ? $"Last indexed {last.LocalDateTime:g}" +
                   (result.Freshness.IsStale ? " (stale)" : "")
@@ -573,18 +593,22 @@ public partial class DependencyExplorerDocumentViewModel : Document, IHasTabHead
 
     private void ApplyFilter()
     {
-        if (string.IsNullOrWhiteSpace(FilterText))
+        if (string.IsNullOrWhiteSpace(FilterText) && !ShowDynamicSqlOnly)
         {
             Nodes = _allNodes;
             Edges = _allEdges;
             return;
         }
 
+        // The two filters AND together (both must pass) - the root is always kept as an anchor
+        // point regardless of either one, matching the free-text filter's existing behavior.
         var visibleIds = _allNodes
             .Where(node =>
                 node.IsRoot ||
-                node.QualifiedName.Contains(FilterText, StringComparison.OrdinalIgnoreCase) ||
-                node.Type.Contains(FilterText, StringComparison.OrdinalIgnoreCase))
+                ((string.IsNullOrWhiteSpace(FilterText) ||
+                  node.QualifiedName.Contains(FilterText, StringComparison.OrdinalIgnoreCase) ||
+                  node.Type.Contains(FilterText, StringComparison.OrdinalIgnoreCase)) &&
+                 (!ShowDynamicSqlOnly || node.IsDynamicSql)))
             .Select(static node => node.Id)
             .ToHashSet(StringComparer.Ordinal);
         Nodes = _allNodes.Where(node => visibleIds.Contains(node.Id)).ToArray();

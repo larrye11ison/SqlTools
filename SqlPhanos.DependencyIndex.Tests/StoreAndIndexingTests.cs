@@ -286,6 +286,41 @@ public sealed class StoreAndIndexingTests
     }
 
     [Fact]
+    public async Task ReturnCodeCaptureIsNotFlaggedAsDynamicSqlButGenuineDynamicSqlStillIs()
+    {
+        // Regression test: ContainsDynamicSql used to treat any "EXEC @token" as dynamic SQL,
+        // which misfired on the extremely common EXEC @rc = ProcName return-code-capture
+        // pattern - the token right after EXEC is a variable there too, but it captures a
+        // return code, not a query string. The actual callee (the token after "=") must be
+        // checked instead.
+        await using var index = await TestIndex.CreateAsync();
+        var objects = new[]
+        {
+            TestIndex.Object(1, "dbo", "CallsWithReturnCodeCapture", "SQL_STORED_PROCEDURE",
+                "CREATE PROCEDURE dbo.CallsWithReturnCodeCapture AS " +
+                "DECLARE @rc INT; EXEC @rc = dbo.SomeOtherProc @Param1 = 5; SELECT @rc;"),
+            TestIndex.Object(2, "dbo", "SomeOtherProc", "SQL_STORED_PROCEDURE",
+                "CREATE PROCEDURE dbo.SomeOtherProc AS SELECT 1;"),
+            TestIndex.Object(3, "dbo", "GenuinelyDynamic", "SQL_STORED_PROCEDURE",
+                "CREATE PROCEDURE dbo.GenuinelyDynamic AS " +
+                "DECLARE @sql NVARCHAR(MAX) = 'SELECT 1'; EXEC (@sql);"),
+        };
+        await index.Builder.BuildAsync(TestIndex.Snapshot(objects));
+
+        var withReturnCode = (await index.Graph.SearchObjectsAsync("CallsWithReturnCodeCapture", 10))
+            .Single(item => item.Name == "CallsWithReturnCodeCapture");
+        var genuinelyDynamic = (await index.Graph.SearchObjectsAsync("GenuinelyDynamic", 10))
+            .Single(item => item.Name == "GenuinelyDynamic");
+
+        Assert.Equal(AnalysisStatus.Complete, withReturnCode.AnalysisStatus);
+        Assert.False(withReturnCode.HasDynamicSql);
+        Assert.Contains((await index.Graph.GetDirectAsync(withReturnCode.ObjectKey, GraphDirection.Uses)).Edges,
+            edge => edge.Edge.TargetObjectName == "SomeOtherProc");
+        Assert.Equal(AnalysisStatus.DynamicSql, genuinelyDynamic.AnalysisStatus);
+        Assert.True(genuinelyDynamic.HasDynamicSql);
+    }
+
+    [Fact]
     public async Task InaccessibleAndFailedDatabasesReportTheirErrorMessages()
     {
         await using var index = await TestIndex.CreateAsync();
