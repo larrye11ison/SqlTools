@@ -222,7 +222,7 @@ public partial class ShellView : Window
             return;
         }
 
-        var updaterPath = Path.Combine(AppContext.BaseDirectory, "SqlPhanos.Updater.exe");
+        var updaterPath = StageUpdater();
         var relaunchPath = Process.GetCurrentProcess().MainModule?.FileName
             ?? Path.Combine(AppContext.BaseDirectory, "SqlPhanos.exe");
 
@@ -239,6 +239,37 @@ public partial class ShellView : Window
             desktop.Shutdown();
         }
     }
+
+    // The update zip contains SqlPhanos.Updater's own files alongside SqlPhanos's (both are
+    // published to the same release folder) - if the updater ran from its normal install-dir
+    // location, it would be trying to overwrite its own running .exe/.dll, which Windows keeps
+    // locked for as long as the process is alive, and extraction would fail every time. Staging
+    // a copy in temp and running that instead means the running updater never holds a lock on
+    // anything inside the install directory it's extracting into.
+    private static string StageUpdater()
+    {
+        var stagingDir = Path.Combine(Path.GetTempPath(), $"SqlPhanos-updater-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(stagingDir);
+
+        foreach (var fileName in UpdaterFileNames)
+        {
+            var sourcePath = Path.Combine(AppContext.BaseDirectory, fileName);
+            if (File.Exists(sourcePath))
+            {
+                File.Copy(sourcePath, Path.Combine(stagingDir, fileName), overwrite: true);
+            }
+        }
+
+        return Path.Combine(stagingDir, "SqlPhanos.Updater.exe");
+    }
+
+    private static readonly string[] UpdaterFileNames =
+    {
+        "SqlPhanos.Updater.exe",
+        "SqlPhanos.Updater.dll",
+        "SqlPhanos.Updater.deps.json",
+        "SqlPhanos.Updater.runtimeconfig.json"
+    };
 
     private static async Task<string> DownloadUpdateAsync(string url)
     {
